@@ -2137,10 +2137,12 @@
 
     function inferFundMarket(fund, quote = {}) {
       const codeMarket = {
-        "002891": "US"
+        "002891": "US",
+        "457001": "ASIA"
       };
       if (codeMarket[fund.code]) return codeMarket[fund.code];
       const text = `${fund.code || ""} ${fund.alias || ""} ${quote.name || ""}`.toUpperCase();
+      if (/亚洲机会|亚洲.*除日本|亚太区不包括日本/.test(text)) return "ASIA";
       if (/纳斯达克|NASDAQ|纳指|标普|S&P|道琼|美股|美元|全球精选|海外|QDII|移动互联|全球科技|智能科技|高端制造/.test(text)) return "US";
       if (/恒生|港股|香港|H股|中概/.test(text)) return "HK";
       if (/日经|日本/.test(text)) return "JP";
@@ -2164,7 +2166,8 @@
         HK: { zone: "Asia/Hong_Kong", ranges: [[570, 720], [780, 960]], label: "港股盘中", closed: "港股休市" },
         JP: { zone: "Asia/Tokyo", ranges: [[540, 690], [750, 900]], label: "日股盘中", closed: "日股休市" },
         KR: { zone: "Asia/Seoul", ranges: [[540, 930]], label: "韩股盘中", closed: "韩股休市" },
-        TW: { zone: "Asia/Taipei", ranges: [[540, 810]], label: "台股盘中", closed: "台股休市" }
+        TW: { zone: "Asia/Taipei", ranges: [[540, 810]], label: "台股盘中", closed: "台股休市" },
+        ASIA: { zone: "Asia/Hong_Kong", ranges: [[540, 1020]], label: "亚洲除日本盘中", closed: "亚洲除日本休市" }
       };
       const config = configs[market] || configs.CN;
       const clock = zonedClock(config.zone);
@@ -2207,6 +2210,14 @@
       return NaN;
     }
 
+    function officialIsNewerThanEstimate(official, quote) {
+      if (!official?.date) return false;
+      const officialDate = compactDate(official.date);
+      const estimateDate = compactDate(quote?.estimateTime);
+      const quoteNavDate = compactDate(quote?.navDate);
+      return Boolean(officialDate && ((estimateDate && officialDate >= estimateDate) || (quoteNavDate && officialDate > quoteNavDate)));
+    }
+
     function classifyFundEstimateStage(fund, quote, session = marketSession(inferFundMarket(fund, quote))) {
       const market = inferFundMarket(fund, quote);
       const parts = estimateTimeParts(quote?.estimateTime);
@@ -2215,7 +2226,7 @@
       if (session.stage === "post") return "post";
       if (!parts) return "closed";
       if (market === "US" && parts.hour >= 3 && parts.hour <= 8) return "post";
-      if (["CN", "HK", "JP", "KR", "TW"].includes(market) && parts.hour >= 15) return "post";
+      if (["CN", "HK", "JP", "KR", "TW", "ASIA"].includes(market) && parts.hour >= 15) return "post";
       return "closed";
     }
 
@@ -2228,7 +2239,7 @@
         if (parts.hour >= 16 && parts.hour < 21) return "pre";
         if (parts.hour >= 21 || parts.hour < 3) return "regular";
       }
-      if (["CN", "HK", "JP", "KR", "TW"].includes(market)) {
+      if (["CN", "HK", "JP", "KR", "TW", "ASIA"].includes(market)) {
         if (parts.hour >= 15) return "post";
         if (parts.hour >= 9) return "regular";
       }
@@ -2349,6 +2360,9 @@
         const postLabel = Number.isFinite(officialChange) ? "实际" : "";
         const latestNav = latestOfficial?.nav || quote.nav;
         const latestNavDate = latestOfficial?.date || quote.navDate || "";
+        const useOfficialAsEstimate = officialIsNewerThanEstimate(latestOfficial, quote);
+        const displayNav = useOfficialAsEstimate ? latestOfficial.nav : nav;
+        const displayNavLabel = useOfficialAsEstimate ? "实际" : "";
 
         const selected = state.config.selectedFund === fund.code;
         const row = document.createElement("tr");
@@ -2357,7 +2371,7 @@
           <td><input type="checkbox" data-check="${fund.code}"></td>
           <td class="code">${fund.code}</td>
           <td class="name" title="${escapeHtml(quote.name || fund.alias)}">${escapeHtml(quote.name || fund.alias || "")}</td>
-          <td>${nav ? money(nav) : "--"}</td>
+          <td>${displayNav ? `${money(displayNav)}${displayNavLabel ? ` <span class="muted">${displayNavLabel}</span>` : ""}` : "--"}</td>
           <td class="${liveCls(preChange)}">${liveText(Number.isFinite(preChange) ? pct(preChange) : "--")}</td>
           <td class="${liveCls(regularChange)}">${liveText(Number.isFinite(regularChange) ? pct(regularChange) : "--")}</td>
           <td class="${liveCls(postChange)}">${liveText(Number.isFinite(postChange) ? `${pct(postChange)}${postLabel ? ` <span class="muted">${postLabel}</span>` : ""}` : "--")}</td>
