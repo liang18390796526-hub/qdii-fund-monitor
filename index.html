@@ -924,7 +924,7 @@
     }
 
     function blankOcrRow(platform = "未知平台") {
-      return { code: "", name: "", platform, shares: 0, amount: 0, profit: 0, profitRate: 0, date: "", confidence: 0, verified: false };
+      return { code: "", name: "", platform, shares: 0, amount: 0, profit: 0, profitRate: 0, date: "", confidence: 0, verified: false, sourceType: "manual" };
     }
 
     function usefulFundName(value) {
@@ -932,6 +932,75 @@
       if (text.length < 4 || text.length > 36) return false;
       if (/支付宝|蚂蚁|财付通|理财通|天天基金|浏览器|安全|保障|省钱|外资|确认|买入|卖出|截图|识别/.test(text)) return false;
       return /基金|混合|股票|债券|指数|ETF|联接|QDII|LOF|纳斯达克|标普|恒生|招商|华夏|易方达|广发|天弘|南方|嘉实|富国|华安/.test(text);
+    }
+
+    function cleanOcrFundName(value) {
+      return String(value || "")
+        .replace(/\s+/g, "")
+        .replace(/[|｜]/g, "")
+        .replace(/\.{2,}|…+/g, "")
+        .replace(/^(名称|基金名称|我的持有|全部|偏股|偏债|指数|黄金)/, "")
+        .trim();
+    }
+
+    function isLikelyFundNameLine(line) {
+      const text = cleanOcrFundName(line);
+      if (!usefulFundName(text)) return false;
+      if (/投资锦囊|市场解读|买入|卖出|更新|昨日收益|持有收益|金额|全部|排序|更多产品|去市场/.test(text)) return false;
+      if (/[-+]?\d[\d,，]*(?:\.\d+)?/.test(text) && !/(QDII|ETF|LOF)/i.test(text)) return false;
+      return true;
+    }
+
+    function ocrNumbers(line) {
+      return [...String(line || "").matchAll(/[-+]?\d{1,3}(?:[,，]\d{3})*(?:\.\d+)?|[-+]?\d+\.\d+/g)]
+        .map(match => ({ raw: match[0], value: parseOcrNumber(match[0]), signed: /^[+-]/.test(match[0]) }));
+    }
+
+    function pickHoldingNumbers(segment) {
+      const numbers = ocrNumbers(segment)
+        .filter(item => Number.isFinite(item.value) && item.value >= 0 && item.value < 100000000)
+        .filter(item => !/^20\d{2}$/.test(String(Math.round(item.value))));
+      const amountItem = numbers.find(item => !item.signed && item.value >= 0.01);
+      const afterAmount = amountItem ? numbers.slice(numbers.indexOf(amountItem) + 1) : numbers;
+      const profitItem = afterAmount.find(item => item.signed) || null;
+      const rateMatch = String(segment || "").match(/[-+]?\d+(?:\.\d+)?\s*%/);
+      return {
+        amount: amountItem?.value || 0,
+        profit: profitItem?.value || 0,
+        profitRate: rateMatch ? parseOcrNumber(rateMatch[0]) : 0
+      };
+    }
+
+    function parseHoldingListRows(lines, platform, date) {
+      const rows = [];
+      for (let i = 0; i < lines.length; i += 1) {
+        let name = cleanOcrFundName(lines[i]);
+        if (!isLikelyFundNameLine(name) && i + 1 < lines.length) {
+          const joined = cleanOcrFundName(`${lines[i]}${lines[i + 1]}`);
+          if (isLikelyFundNameLine(joined)) {
+            name = joined;
+            i += 1;
+          }
+        }
+        if (!isLikelyFundNameLine(name)) continue;
+        const segment = lines.slice(i + 1, i + 5).join(" ");
+        const nums = pickHoldingNumbers(segment);
+        if (!nums.amount && !nums.profit && !nums.profitRate) continue;
+        rows.push({
+          code: "",
+          name,
+          platform,
+          shares: 0,
+          amount: nums.amount,
+          profit: nums.profit,
+          profitRate: nums.profitRate,
+          date,
+          confidence: [name, nums.amount, nums.profit || nums.profitRate].filter(Boolean).length,
+          verified: false,
+          sourceType: "holding-list"
+        });
+      }
+      return rows;
     }
 
     function extractFundCodesFromOcr(lines) {
@@ -961,6 +1030,8 @@
       let amount = findNearNumber(lines, ["持有金额", "持仓金额", "持有市值", "资产", "金额"]);
       const profit = findNearNumber(lines, ["持有收益", "累计收益", "收益", "盈亏"]);
       const profitRate = findNearNumber(lines, ["收益率", "持有收益率", "盈亏率"]);
+      const listRows = parseHoldingListRows(lines, platform, date);
+      if (listRows.length >= 2) return listRows;
       if (!amount) amount = guessOcrAmount(text, [shares, profit, profitRate].filter(Boolean));
       const rows = (codes.length ? codes : [""]).map(code => {
         const codeIndex = code ? text.indexOf(code) : -1;
@@ -970,7 +1041,7 @@
         const guessedName = nameMatch ? nameMatch[0].replace(/^(持有|详情|基金|名称|代码)/, "").trim() : "";
         const name = usefulFundName(guessedName) ? guessedName : "";
         const confidence = [code, shares, amount, profit || profitRate, date].filter(Boolean).length;
-        return { code, name, platform, shares, amount, profit, profitRate, date, confidence, verified: Boolean(code) };
+        return { code, name, platform, shares, amount, profit, profitRate, date, confidence, verified: Boolean(code), sourceType: "single" };
       });
       if (!rows.length) rows.push(blankOcrRow(platform));
       return rows;
@@ -1006,6 +1077,12 @@
     }
 
     async function resolveOcrCodesByName() {
+      const resolved = await resolveOcrRowsByName();
+      renderOcrRows();
+      alert(resolved ? `已补全 ${resolved} 条基金代码` : "没有按名称匹配到基金代码，请手动填写 6 位代码");
+    }
+
+    async function resolveOcrRowsByName() {
       let resolved = 0;
       els.ocrResolveBtn.disabled = true;
       try {
@@ -1023,10 +1100,10 @@
             resolved += 1;
           }
         }
-        renderOcrRows();
-        alert(resolved ? `已补全 ${resolved} 条基金代码` : "没有按名称匹配到基金代码，请手动填写 6 位代码");
+        return resolved;
       } catch (error) {
         alert(`补代码失败：${error.message || error}`);
+        return 0;
       } finally {
         els.ocrResolveBtn.disabled = false;
       }
@@ -1035,7 +1112,8 @@
     function applyOcrRowToFund(row, fund) {
       if (row.name && usefulFundName(row.name)) fund.alias = row.name;
       if (row.shares) fund.shares = row.shares;
-      if (row.amount) fund.cost = row.amount;
+      if (row.amount) fund.ocrAmount = row.amount;
+      if (row.amount && Number.isFinite(Number(row.profit))) fund.cost = Math.max(0, row.amount - Number(row.profit || 0));
       fund.source = row.platform || fund.source;
       fund.holdingDate = row.date || fund.holdingDate;
       fund.ocrProfit = row.profit || fund.ocrProfit;
@@ -1084,7 +1162,11 @@
       renderOcrRows();
     }
 
-    function importOcrRows() {
+    async function importOcrRows() {
+      if (state.ocrRows.some(row => row.name && !row.verified)) {
+        await resolveOcrRowsByName();
+        renderOcrRows();
+      }
       const rows = state.ocrRows
         .map(row => ({ ...row, code: String(row.code || "").replace(/\D/g, "").slice(0, 6) }))
         .filter(row => /^\d{6}$/.test(row.code) && row.verified);
@@ -1446,10 +1528,13 @@
         const buyStatus = latestHistory?.buyStatus || trade.buyStatus || "";
         const nav = quote.estimate || quote.nav || 0;
         const shares = Number(fund.shares) || 0;
-        const cost = Number(fund.cost) || 0;
+        const screenshotValue = Number(fund.ocrAmount) || 0;
+        const screenshotProfit = Number(fund.ocrProfit);
+        const inferredCost = screenshotValue && Number.isFinite(screenshotProfit) ? Math.max(0, screenshotValue - screenshotProfit) : 0;
+        const cost = Number(fund.cost) || inferredCost || 0;
         const fee = Number(fund.fee) || 0;
-        const value = shares * nav;
-        const profit = value - cost - fee;
+        const value = shares && nav ? shares * nav : screenshotValue;
+        const profit = screenshotValue && Number.isFinite(screenshotProfit) ? screenshotProfit : value - cost - fee;
         const profitRate = cost + fee > 0 ? profit / (cost + fee) * 100 : NaN;
         totalCost += cost + fee;
         totalValue += value;
@@ -1471,7 +1556,7 @@
           <td><input data-edit="${fund.code}" data-field="cost" type="number" min="0" step="0.01" value="${fund.cost || ""}"></td>
           <td><input data-edit="${fund.code}" data-field="fee" type="number" min="0" step="0.01" value="${fund.fee || ""}"></td>
           <td>${value ? money(value) : "--"}</td>
-          <td class="${cls(profit)}">${shares ? money(profit) : "--"}</td>
+          <td class="${cls(profit)}">${value ? money(profit) : "--"}</td>
           <td class="${cls(profitRate)}">${Number.isFinite(profitRate) ? pct(profitRate) : "--"}</td>
           <td class="${quote.error ? "warn" : "muted"}">${escapeHtml(quote.error || "正常")}</td>
         `;
