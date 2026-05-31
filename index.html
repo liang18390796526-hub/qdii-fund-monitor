@@ -916,20 +916,44 @@
     }
 
     function guessOcrAmount(text, usedValues = []) {
-      const nums = [...String(text || "").matchAll(/[-+]?¥?\s*\d[\d,，]*(?:\.\d+)?\s*(?:元)?/g)]
+      const normalized = String(text || "").replace(/(\d)\s+([,，.]\s*\d)/g, "$1$2").replace(/([,，.])\s+(\d)/g, "$1$2");
+      const nums = [...normalized.matchAll(/[-+]?¥?\s*\d[\d,，]*(?:\.\d+)?\s*(?:元)?/g)]
         .map(match => parseOcrNumber(match[0]))
-        .filter(num => Number.isFinite(num) && num > 0 && !usedValues.includes(num));
+        .filter(num => Number.isFinite(num) && num >= 10 && num < 100000000 && !usedValues.includes(num));
       return nums.length ? Math.max(...nums) : 0;
     }
 
     function blankOcrRow(platform = "未知平台") {
-      return { code: "", name: "", platform, shares: 0, amount: 0, profit: 0, profitRate: 0, date: "", confidence: 0 };
+      return { code: "", name: "", platform, shares: 0, amount: 0, profit: 0, profitRate: 0, date: "", confidence: 0, verified: false };
+    }
+
+    function usefulFundName(value) {
+      const text = String(value || "").trim();
+      if (text.length < 4 || text.length > 36) return false;
+      if (/支付宝|蚂蚁|财付通|理财通|天天基金|浏览器|安全|保障|省钱|外资|确认|买入|卖出|截图|识别/.test(text)) return false;
+      return /基金|混合|股票|债券|指数|ETF|联接|QDII|LOF|纳斯达克|标普|恒生|招商|华夏|易方达|广发|天弘|南方|嘉实|富国|华安/.test(text);
+    }
+
+    function extractFundCodesFromOcr(lines) {
+      const codes = new Set();
+      lines.forEach((line, index) => {
+        const matches = line.match(/\b\d{6}\b/g) || [];
+        if (!matches.length) return;
+        const nearby = lines.slice(Math.max(0, index - 1), index + 2).join(" ");
+        const hasCodeLabel = /基金代码|产品代码|代码|基金/.test(nearby);
+        const hasProductText = /基金|混合|股票|债券|指数|ETF|联接|QDII|LOF|纳斯达克|标普|恒生/.test(nearby);
+        for (const code of matches) {
+          if (/^20\d{4}$/.test(code)) continue;
+          if (hasCodeLabel || hasProductText) codes.add(code);
+        }
+      });
+      return [...codes];
     }
 
     function parseHoldingScreenshotText(rawText) {
       const text = normalizeOcrText(rawText);
       const lines = text.split("\n").map(line => line.trim()).filter(Boolean);
-      const codes = [...new Set((text.match(/\b\d{6}\b/g) || []).filter(code => !/^20\d{4}$/.test(code)))];
+      const codes = extractFundCodesFromOcr(lines);
       const platform = detectOcrPlatform(text);
       const date = findNearText(lines, ["持有日期", "持仓日期", "确认日期", "买入日期", "交易日"], /(20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2})/) ||
         (text.match(/20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}/)?.[0] || "");
@@ -943,9 +967,10 @@
         const before = codeIndex >= 0 ? text.slice(Math.max(0, codeIndex - 45), codeIndex) : lines.slice(0, 4).join(" ");
         const after = codeIndex >= 0 ? text.slice(codeIndex + code.length, codeIndex + code.length + 45) : "";
         const nameMatch = `${before} ${after}`.match(/[\u4e00-\u9fa5A-Za-z0-9（）()·\-]{3,36}(?:基金|混合|股票|债券|指数|ETF|联接|QDII|LOF|C|A)?/);
-        const name = nameMatch ? nameMatch[0].replace(/^(持有|详情|基金|名称)/, "").trim() : "";
+        const guessedName = nameMatch ? nameMatch[0].replace(/^(持有|详情|基金|名称|代码)/, "").trim() : "";
+        const name = usefulFundName(guessedName) ? guessedName : "";
         const confidence = [code, shares, amount, profit || profitRate, date].filter(Boolean).length;
-        return { code, name, platform, shares, amount, profit, profitRate, date, confidence };
+        return { code, name, platform, shares, amount, profit, profitRate, date, confidence, verified: Boolean(code) };
       });
       if (!rows.length) rows.push(blankOcrRow(platform));
       return rows;
@@ -968,7 +993,7 @@
           <td><input data-ocr="${index}" data-field="profit" type="number" step="0.01" value="${row.profit || ""}"></td>
           <td><input data-ocr="${index}" data-field="profitRate" type="number" step="0.01" value="${row.profitRate || ""}"></td>
           <td><input data-ocr="${index}" data-field="date" value="${escapeHtml(row.date || "")}"></td>
-          <td>${row.confidence || 0}/5</td>
+          <td>${row.verified ? "已确认" : `${row.confidence || 0}/5 待确认`}</td>
           <td><button class="mini" data-ocr-action="current" data-index="${index}">导入到当前基金</button></td>
         `;
         els.ocrBody.appendChild(tr);
@@ -994,6 +1019,7 @@
             row.code = fund.CODE;
             row.name = fund.NAME || row.name;
             row.confidence = Math.max(row.confidence || 0, 3);
+            row.verified = true;
             resolved += 1;
           }
         }
@@ -1007,7 +1033,7 @@
     }
 
     function applyOcrRowToFund(row, fund) {
-      fund.alias = row.name || fund.alias;
+      if (row.name && usefulFundName(row.name)) fund.alias = row.name;
       if (row.shares) fund.shares = row.shares;
       if (row.amount) fund.cost = row.amount;
       fund.source = row.platform || fund.source;
@@ -1061,8 +1087,8 @@
     function importOcrRows() {
       const rows = state.ocrRows
         .map(row => ({ ...row, code: String(row.code || "").replace(/\D/g, "").slice(0, 6) }))
-        .filter(row => /^\d{6}$/.test(row.code));
-      if (!rows.length) return alert("没有可导入的 6 位基金代码，请先修正识别结果");
+        .filter(row => /^\d{6}$/.test(row.code) && row.verified);
+      if (!rows.length) return alert("没有已确认的 6 位基金代码。请手动填写代码后点“按名称补代码”，或直接点行内“导入到当前基金”。");
       for (const row of rows) {
         const existing = state.config.funds.find(fund => fund.code === row.code);
         const target = existing || { code: row.code, alias: row.name || row.code, shares: 0, cost: 0, fee: 0 };
@@ -2280,6 +2306,9 @@
         if (!row) return;
         const field = target.dataset.field;
         row[field] = target.type === "number" ? Number(target.value) || 0 : target.value.trim();
+        if (field === "code") row.verified = /^\d{6}$/.test(String(row.code || ""));
+        if (field === "name" && !usefulFundName(row.name)) row.verified = false;
+        renderOcrRows();
       });
       els.fundBody.addEventListener("change", event => {
         const target = event.target;
