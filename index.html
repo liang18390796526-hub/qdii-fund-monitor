@@ -766,7 +766,7 @@
           <div class="hint" id="signalTitle">选择一只基金后对比信号误差</div>
         </div>
         <div class="toolbar" style="grid-template-columns:minmax(260px,1fr) auto;border-bottom:1px solid var(--line);">
-          <input id="thsEndpointInput" placeholder="同花顺备用接口模板，例如 https://127.0.0.1:8787/ths?code={code}">
+          <input id="thsEndpointInput" placeholder="同花顺JSON接口/本地代理，例如 https://127.0.0.1:8787/ths?code={code}">
           <button class="mini" id="thsTestBtn">刷新同花顺源</button>
         </div>
         <div class="table-wrap">
@@ -783,7 +783,7 @@
             <tbody id="signalBody"></tbody>
           </table>
         </div>
-        <div class="notice">误差以“天天基金估算涨跌”为基准。同花顺备用源需要你后续提供已登录可访问或本地代理接口，返回 JSON；浏览器跨域、登录态和授权限制由该接口自行处理。</div>
+        <div class="notice">误差以“天天基金估算涨跌”为基准。这里需要填写返回 JSON 的接口或本地代理，不能直接填同花顺普通网页地址。示例返回：{"changePct":0.34,"estimate":2.31,"time":"2026-06-01 21:45","source":"同花顺"}。浏览器跨域、登录态和授权限制由该接口自行处理。</div>
       </section>
 
       <section>
@@ -1933,15 +1933,26 @@
     async function fetchThsSignal(code) {
       const template = String(state.config.thsEndpoint || "").trim();
       if (!template) return { code, error: "未配置同花顺备用接口" };
+      if (/q\.10jqka\.com\.cn\/?(usa|hk|gn|hy|)/i.test(template)) {
+        return { code, error: "这是同花顺网页地址，不是JSON接口；请填写本地代理或可返回JSON的接口" };
+      }
       const url = template.includes("{code}")
         ? template.replaceAll("{code}", encodeURIComponent(code))
         : `${template}${template.includes("?") ? "&" : "?"}code=${encodeURIComponent(code)}`;
       try {
         const response = await fetch(url, { credentials: "include", cache: "no-store" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.includes("json")) {
+          const text = await response.text();
+          throw new Error(text.trim().startsWith("<") ? "接口返回HTML页面，不是JSON数据" : "接口返回内容不是JSON");
+        }
         return normalizeThsSignal(code, await response.json());
       } catch (error) {
-        return { code, error: error.message };
+        const message = error.message === "Failed to fetch"
+          ? "请求被浏览器拦截或跨域失败；需要本地代理/允许CORS的JSON接口"
+          : error.message;
+        return { code, error: message };
       }
     }
 
