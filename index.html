@@ -874,6 +874,29 @@
 
       <section>
         <div class="section-head">
+          <h2>实时期货参考</h2>
+          <div class="hint">盘前参考纳指、标普、道指期货，辅助判断 QDII 方向</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>类别</th>
+                <th>品种</th>
+                <th>价格/单位</th>
+                <th>涨跌幅</th>
+                <th>涨跌值</th>
+                <th>当日曲线</th>
+                <th>成交额</th>
+              </tr>
+            </thead>
+            <tbody id="futuresBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
           <h2>资源商品实时行情</h2>
           <div class="hint">黄金、白银、有色金属、国际油价自动刷新</div>
         </div>
@@ -986,6 +1009,15 @@
       { market: "韩股", secid: "100.KS11", name: "韩国KOSPI" },
       { market: "台股", secid: "100.TWII", name: "台湾加权" }
     ];
+    const FUTURES_QUOTES = [
+      { group: "美股期货", secid: "103.NQ00Y", name: "纳指100期货", unit: "点" },
+      { group: "美股期货", secid: "103.ES00Y", name: "标普500期货", unit: "点" },
+      { group: "美股期货", secid: "103.YM00Y", name: "道指期货", unit: "点" },
+      { group: "贵金属期货", secid: "101.GC00Y", name: "COMEX黄金", unit: "美元/盎司" },
+      { group: "贵金属期货", secid: "101.SI00Y", name: "COMEX白银", unit: "美分/盎司" },
+      { group: "能源期货", secid: "112.B00Y", name: "布伦特原油", unit: "美元/桶" },
+      { group: "能源期货", secid: "102.CL00Y", name: "NYMEX原油", unit: "美元/桶" }
+    ];
     const RESOURCE_QUOTES = [
       { group: "贵金属", secid: "101.GC00Y", name: "COMEX黄金", unit: "美元/盎司" },
       { group: "贵金属", secid: "101.SI00Y", name: "COMEX白银", unit: "美分/盎司" },
@@ -1007,6 +1039,7 @@
       tradeInfo: new Map(),
       indices: new Map(),
       resources: new Map(),
+      futures: new Map(),
       intraday: new Map(),
       fundIntraday: new Map(),
       indexHistory: new Map(),
@@ -1083,6 +1116,7 @@
       indexHistoryTooltip: document.querySelector("#indexHistoryTooltip"),
       indexHistorySummary: document.querySelector("#indexHistorySummary"),
       indexHistoryBody: document.querySelector("#indexHistoryBody"),
+      futuresBody: document.querySelector("#futuresBody"),
       resourceBody: document.querySelector("#resourceBody"),
       stockBody: document.querySelector("#stockBody"),
       watchStockBody: document.querySelector("#watchStockBody"),
@@ -2125,20 +2159,80 @@
       return inRanges(clock.minute, config.ranges) ? { stage: "regular", label: config.label } : { stage: "closed", label: config.closed };
     }
 
+    function estimateTimeParts(value) {
+      const match = String(value || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{1,2})/);
+      if (!match) return null;
+      return {
+        year: Number(match[1]),
+        month: Number(match[2]),
+        day: Number(match[3]),
+        hour: Number(match[4]),
+        minute: Number(match[5])
+      };
+    }
+
+    function classifyFundEstimateStage(fund, quote, session = marketSession(inferFundMarket(fund, quote))) {
+      const market = inferFundMarket(fund, quote);
+      const parts = estimateTimeParts(quote?.estimateTime);
+      if (session.stage === "pre") return "pre";
+      if (session.stage === "regular") return "regular";
+      if (session.stage === "post") return "post";
+      if (!parts) return "closed";
+      if (market === "US" && parts.hour >= 3 && parts.hour <= 8) return "post";
+      if (["CN", "HK", "JP", "KR", "TW"].includes(market) && parts.hour >= 15) return "post";
+      return "closed";
+    }
+
+    function estimateDataStage(fund, quote) {
+      const market = inferFundMarket(fund, quote);
+      const parts = estimateTimeParts(quote?.estimateTime);
+      if (!parts) return "closed";
+      if (market === "US") {
+        if (parts.hour >= 3 && parts.hour <= 8) return "post";
+        if (parts.hour >= 16 && parts.hour < 21) return "pre";
+        if (parts.hour >= 21 || parts.hour < 3) return "regular";
+      }
+      if (["CN", "HK", "JP", "KR", "TW"].includes(market)) {
+        if (parts.hour >= 15) return "post";
+        if (parts.hour >= 9) return "regular";
+      }
+      return "closed";
+    }
+
+    function futureProxySecid(fund, quote = {}) {
+      const text = `${fund.code || ""} ${fund.alias || ""} ${quote.name || ""}`.toUpperCase();
+      if (/标普|S&P|SP500|500/.test(text)) return "103.ES00Y";
+      if (/道琼|DOW/.test(text)) return "103.YM00Y";
+      if (/纳斯达克|NASDAQ|纳指|100/.test(text)) return "103.NQ00Y";
+      return "";
+    }
+
+    function calcFundPreSignal(fund, quote) {
+      const session = marketSession(inferFundMarket(fund, quote));
+      if (session.stage !== "pre") return NaN;
+      const holdingSignal = calcHoldingSignals(state.holdings.get(fund.code));
+      if (Number.isFinite(holdingSignal.extended)) return holdingSignal.extended;
+      const future = state.futures.get(futureProxySecid(fund, quote));
+      return Number.isFinite(future?.changePct) ? future.changePct : NaN;
+    }
+
     function updateFundIntraday(fund, quote) {
-      const change = Number(quote?.estimateChange);
-      if (!Number.isFinite(change)) return;
       const market = inferFundMarket(fund, quote);
       const session = marketSession(market);
+      const stage = classifyFundEstimateStage(fund, quote, session);
+      const quoteChange = Number(quote?.estimateChange);
+      const preSignal = calcFundPreSignal(fund, quote);
+      const change = stage === "pre" && Number.isFinite(preSignal) ? preSignal : quoteChange;
+      if (!Number.isFinite(change)) return;
       const existing = state.fundIntraday.get(fund.code) || { rows: [], market, session: session.stage, latest: {} };
       existing.market = market;
       existing.session = session.stage;
       existing.label = session.label;
       existing.latest = {};
-      if (session.stage === "pre") existing.latest.pre = change;
-      if (session.stage === "regular") existing.latest.regular = change;
-      if (session.stage === "post") existing.latest.post = change;
-      if (session.stage !== "closed") {
+      if (stage === "pre") existing.latest.pre = change;
+      if (stage === "regular") existing.latest.regular = change;
+      if (stage === "post") existing.latest.post = change;
+      if (session.stage !== "closed" && stage === session.stage) {
         const minuteKey = Math.floor(Date.now() / 60000);
         const last = existing.rows.at(-1);
         const point = { t: Date.now(), minuteKey, value: change, stage: session.stage };
@@ -2206,9 +2300,12 @@
         totalCost += cost + fee;
         totalValue += value;
         const currentEstimateChange = Number.isFinite(quote.estimateChange) ? quote.estimateChange : NaN;
-        const preChange = fundStageValue(fund.code, "pre");
-        const regularChange = fundStageValue(fund.code, "regular");
-        const postChange = fundStageValue(fund.code, "post");
+        const session = marketSession(inferFundMarket(fund, quote));
+        const stage = classifyFundEstimateStage(fund, quote, session);
+        const dataStage = estimateDataStage(fund, quote);
+        const preChange = calcFundPreSignal(fund, quote);
+        const regularChange = stage === "regular" && dataStage !== "post" ? currentEstimateChange : NaN;
+        const postChange = stage === "post" || dataStage === "post" ? currentEstimateChange : NaN;
 
         const selected = state.config.selectedFund === fund.code;
         const row = document.createElement("tr");
@@ -3003,6 +3100,7 @@
 
     function renderStocks() {
       renderIndexes();
+      renderFutures();
       renderResources();
       const allRows = [...state.selectedHoldingCodes].map(secid => state.stocks.get(secid)).filter(Boolean);
       els.stockBody.innerHTML = allRows.length ? "" : `<tr><td colspan="9" class="muted">等待持仓数据</td></tr>`;
@@ -3021,6 +3119,24 @@
           renderStocks();
         });
         els.watchStockBody.appendChild(row);
+      }
+    }
+
+    function renderFutures() {
+      els.futuresBody.innerHTML = "";
+      for (const item of FUTURES_QUOTES) {
+        const quote = state.futures.get(item.secid);
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(item.group)}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${quote?.price ? `${money(quote.price)} <span class="muted">${escapeHtml(item.unit)}</span>` : "--"}</td>
+          <td class="${liveCls(quote?.changePct)}">${liveText(Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--")}</td>
+          <td class="${liveCls(quote?.change)}">${liveText(Number.isFinite(quote?.change) ? money(quote.change) : "--")}</td>
+          <td>${renderSpark(item.secid, quote?.changePct)}</td>
+          <td>${quote?.amount ? money(quote.amount / 100000000) + "亿" : "--"}</td>
+        `;
+        els.futuresBody.appendChild(tr);
       }
     }
 
@@ -3134,13 +3250,16 @@
       const fundSecids = state.config.funds.map(fund => secidFromFundCode(fund.code)).filter(Boolean);
       const indexSecids = GLOBAL_INDEXES.map(item => item.secid);
       const resourceSecids = RESOURCE_QUOTES.map(item => item.secid);
-      const stocks = await fetchStockQuotes([...state.selectedHoldingCodes, ...watchSecids, ...fundSecids, ...indexSecids, ...resourceSecids]);
+      const futuresSecids = FUTURES_QUOTES.map(item => item.secid);
+      const stocks = await fetchStockQuotes([...state.selectedHoldingCodes, ...watchSecids, ...fundSecids, ...indexSecids, ...resourceSecids, ...futuresSecids]);
       stocks.forEach(stock => {
         const secid = stock.secid || state.selectedHoldingCodes.find(id => id.endsWith(`.${stock.symbol}`)) || watchSecids.find(id => id.endsWith(`.${stock.symbol}`)) || fundSecids.find(id => id.endsWith(`.${stock.symbol}`)) || `105.${stock.symbol}`;
         if (indexSecids.includes(secid)) state.indices.set(secid, stock);
+        else if (futuresSecids.includes(secid)) state.futures.set(secid, stock);
         else if (resourceSecids.includes(secid)) state.resources.set(secid, stock);
         else state.stocks.set(secid, stock);
       });
+      state.config.funds.forEach(fund => updateFundIntraday(fund, state.quotes.get(fund.code) || {}));
 
       const intradayDue = !state.lastIntradayRefresh || Date.now() - state.lastIntradayRefresh > 15000;
       if (intradayDue) {
@@ -3149,6 +3268,7 @@
           ...watchSecids,
           ...fundSecids,
           ...indexSecids,
+          ...futuresSecids,
           ...resourceSecids
         ];
         const trends = await fetchIntradayTrends(trendSecids);
@@ -3470,6 +3590,7 @@
       renderRebalance();
       renderIndexes();
       renderIndexHistory();
+      renderFutures();
       renderResources();
       renderStocks();
       renderOcrRows();
