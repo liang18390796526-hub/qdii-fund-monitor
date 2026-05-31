@@ -1,0 +1,1975 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QDII 基金实时监测</title>
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --panel: #fff;
+      --line: #d9dee8;
+      --text: #1f2937;
+      --muted: #667085;
+      --accent: #1957d2;
+      --up: #c62828;
+      --down: #0b8043;
+      --warn: #8a5a00;
+      --soft: #eef3ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+    .status {
+      color: var(--muted);
+      font-size: 13px;
+      text-align: right;
+      line-height: 1.5;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) auto auto auto auto;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    input, button, select {
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font: inherit;
+      font-size: 14px;
+    }
+    input, select {
+      padding: 0 9px;
+      background: #fff;
+    }
+    button {
+      padding: 0 12px;
+      background: #fff;
+      cursor: pointer;
+    }
+    button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(360px, .85fr);
+      gap: 14px;
+      padding: 14px 18px 18px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-width: 0;
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .table-wrap {
+      overflow: auto;
+      max-height: 420px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 900px;
+    }
+    th, td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      white-space: nowrap;
+      font-size: 13px;
+      vertical-align: middle;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: #f1f3f7;
+      color: #475467;
+      font-weight: 650;
+      z-index: 1;
+    }
+    tr.selected { background: var(--soft); }
+    tr:last-child td { border-bottom: 0; }
+    td input {
+      width: 86px;
+      height: 28px;
+      font-size: 13px;
+    }
+    .code {
+      font-family: Consolas, "Courier New", monospace;
+      font-weight: 650;
+    }
+    .name {
+      max-width: 250px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .up { color: var(--up); font-weight: 650; }
+    .down { color: var(--down); font-weight: 650; }
+    .warn { color: var(--warn); }
+    .muted { color: var(--muted); }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      padding: 12px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fbfcfe;
+    }
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .metric .value {
+      font-size: 19px;
+      font-weight: 700;
+    }
+    .stack {
+      display: grid;
+      gap: 14px;
+    }
+    .search-panel {
+      position: relative;
+    }
+    .search-results {
+      position: absolute;
+      top: 40px;
+      left: 18px;
+      right: 18px;
+      max-height: 320px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 12px 28px rgba(17, 24, 39, .14);
+      z-index: 5;
+      display: none;
+    }
+    .result-row {
+      display: grid;
+      grid-template-columns: 72px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .result-row:last-child { border-bottom: 0; }
+    .result-row strong { font-size: 13px; }
+    .result-row span { color: var(--muted); font-size: 12px; }
+    .mini {
+      height: 28px;
+      padding: 0 9px;
+      font-size: 12px;
+    }
+    .notice {
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      border-top: 1px solid var(--line);
+    }
+    .chart-panel {
+      padding: 12px;
+    }
+    .chart-wrap {
+      position: relative;
+      height: 260px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      overflow: hidden;
+      touch-action: none;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    .history-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .chart-tooltip {
+      position: absolute;
+      display: none;
+      min-width: 150px;
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, .96);
+      box-shadow: 0 8px 20px rgba(17, 24, 39, .12);
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.45;
+      pointer-events: none;
+      z-index: 3;
+    }
+    .tools {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .tools input { width: 90px; }
+    .quick-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 0 18px 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    .tag-btn {
+      height: 28px;
+      padding: 0 10px;
+      font-size: 12px;
+      border-radius: 999px;
+    }
+    a.inline-link {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a.inline-link:hover { text-decoration: underline; }
+    @media (max-width: 1120px) {
+      main { grid-template-columns: 1fr; }
+      .toolbar { grid-template-columns: 1fr 1fr; }
+      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 680px) {
+      header { display: block; }
+      .status { margin-top: 6px; text-align: left; }
+      .toolbar { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr; }
+      button, .toolbar input { width: 100%; }
+      main { padding: 10px; gap: 10px; }
+      section { border-radius: 6px; }
+      .section-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .table-wrap { max-height: 360px; }
+      .chart-wrap { height: 220px; }
+      th, td { padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>QDII 基金实时监测</h1>
+    <div class="status" id="status">准备刷新</div>
+  </header>
+
+  <div class="toolbar search-panel">
+    <input id="searchInput" placeholder="输入基金名称或代码搜索，如 纳指、040046">
+    <button class="primary" id="searchBtn">搜索基金</button>
+    <button id="refreshBtn">立即刷新</button>
+    <label class="tools">间隔(秒)<input id="intervalInput" type="number" min="15" step="15"></label>
+    <label class="tools">提醒(%)<input id="alertInput" type="number" min="0" step="0.1"></label>
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="quick-tags">
+    <span class="hint">板块找基金：</span>
+    <button class="tag-btn" data-theme="CPO">CPO</button>
+    <button class="tag-btn" data-theme="存储芯片">存储芯片</button>
+    <button class="tag-btn" data-theme="光模块">光模块</button>
+    <button class="tag-btn" data-theme="半导体">半导体</button>
+    <button class="tag-btn" data-theme="AI算力">AI算力</button>
+    <button class="tag-btn" data-theme="新能源车">新能源车</button>
+  </div>
+
+  <main>
+    <div class="stack">
+      <section>
+        <div class="section-head">
+          <h2>组合收益</h2>
+          <div class="hint">成本、份额、手续费会自动保存</div>
+        </div>
+        <div class="cards">
+          <div class="metric"><div class="label">总成本</div><div class="value" id="totalCost">--</div></div>
+          <div class="metric"><div class="label">当前市值</div><div class="value" id="totalValue">--</div></div>
+          <div class="metric"><div class="label">浮动收益</div><div class="value" id="totalProfit">--</div></div>
+          <div class="metric"><div class="label">收益率</div><div class="value" id="totalProfitRate">--</div></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>关注基金</h2>
+          <div class="tools">
+            <label>声音提醒 <input id="soundInput" type="checkbox"></label>
+            <button class="mini" id="removeBtn">删除选中</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th></th>
+                <th>代码</th>
+                <th>名称/备注</th>
+                <th>估算净值</th>
+                <th>估算涨跌</th>
+                <th>估算时间</th>
+                <th>最新净值</th>
+                <th>申购状态</th>
+                <th>起购/限额</th>
+                <th>份额</th>
+                <th>总成本</th>
+                <th>手续费</th>
+                <th>市值</th>
+                <th>收益</th>
+                <th>收益率</th>
+                <th>状态</th>
+              </tr>
+            </thead>
+            <tbody id="fundBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>历史净值曲线</h2>
+          <div class="tools">
+            <select id="historyRange">
+              <option value="30">近1个月</option>
+              <option value="90" selected>近3个月</option>
+              <option value="180">近6个月</option>
+              <option value="365">近1年</option>
+            </select>
+            <button class="mini" id="historyBtn">刷新历史</button>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-wrap">
+            <canvas id="historyChart"></canvas>
+            <div class="chart-tooltip" id="historyTooltip"></div>
+          </div>
+          <div class="history-summary" id="historySummary">选择一只基金后显示历史净值</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>单位净值</th>
+                <th>累计净值</th>
+                <th>日涨跌</th>
+                <th>申购状态</th>
+                <th>赎回状态</th>
+              </tr>
+            </thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>多信号源对比</h2>
+          <div class="hint" id="signalTitle">选择一只基金后对比信号误差</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>信号源</th>
+                <th>涨跌信号</th>
+                <th>相对误差</th>
+                <th>覆盖/时间</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody id="signalBody"></tbody>
+          </table>
+        </div>
+        <div class="notice">误差以“天天基金估算涨跌”为基准。持仓加权只覆盖披露的前十大持仓，QDII 存在汇率、现金仓位、期货和持仓滞后影响。</div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>选中基金持股</h2>
+          <div class="hint" id="holdingTitle">选择一只基金查看持股</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>序号</th>
+                <th>代码</th>
+                <th>股票名称</th>
+                <th>占净值</th>
+                <th>持股数(万股)</th>
+                <th>持仓市值(万元)</th>
+                <th>实时价</th>
+                <th>实时涨跌</th>
+              </tr>
+            </thead>
+            <tbody id="holdingBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>调仓变化对比</h2>
+          <div class="hint" id="rebalanceTitle">显示最新一期与上一期持仓变化</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>代码</th>
+                <th>股票名称</th>
+                <th>修改前占净值</th>
+                <th>修改后占净值</th>
+                <th>变化</th>
+                <th>修改前市值(万元)</th>
+                <th>修改后市值(万元)</th>
+              </tr>
+            </thead>
+            <tbody id="rebalanceBody"></tbody>
+          </table>
+        </div>
+        <div class="notice">“修改后”为最新披露持仓，“修改前”为上一期披露持仓。基金披露有滞后，不能代表当前实时仓位。</div>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section>
+        <div class="section-head">
+          <h2>全球指数实时涨幅</h2>
+          <div class="hint">纳斯达克100置顶，覆盖 A股/美股/港股/韩股/台股/日股</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>市场</th>
+                <th>指数</th>
+                <th>点位</th>
+                <th>涨跌幅</th>
+                <th>涨跌点</th>
+                <th>成交额</th>
+              </tr>
+            </thead>
+            <tbody id="indexBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>全球指数历史曲线</h2>
+          <div class="tools">
+            <select id="indexHistoryRange">
+              <option value="30">近1个月</option>
+              <option value="90" selected>近3个月</option>
+              <option value="180">近6个月</option>
+              <option value="365">近1年</option>
+            </select>
+            <button class="mini" id="indexHistoryBtn">刷新指数历史</button>
+          </div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-wrap">
+            <canvas id="indexHistoryChart"></canvas>
+            <div class="chart-tooltip" id="indexHistoryTooltip"></div>
+          </div>
+          <div class="history-summary" id="indexHistorySummary">默认显示纳斯达克100</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>日期</th>
+                <th>收盘</th>
+                <th>涨跌幅</th>
+                <th>涨跌点</th>
+                <th>最高</th>
+                <th>最低</th>
+              </tr>
+            </thead>
+            <tbody id="indexHistoryBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>资源商品实时行情</h2>
+          <div class="hint">黄金、白银、有色金属、国际油价自动刷新</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>类别</th>
+                <th>品种</th>
+                <th>价格/单位</th>
+                <th>涨跌幅</th>
+                <th>涨跌值</th>
+                <th>成交额</th>
+              </tr>
+            </thead>
+            <tbody id="resourceBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>持仓个股实时行情</h2>
+          <div class="hint">自动汇总关注基金前十大持仓</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>代码</th>
+                <th>名称</th>
+                <th>现价</th>
+                <th>涨跌幅</th>
+                <th>涨跌额</th>
+                <th>盘前/盘后价</th>
+                <th>扩展盘涨幅</th>
+                <th>成交额</th>
+              </tr>
+            </thead>
+            <tbody id="stockBody"></tbody>
+          </table>
+        </div>
+        <div class="notice">盘前/盘后字段取自东方财富美股扩展行情接口；没有披露时显示 “--”。</div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>自选美股/港股</h2>
+          <div class="tools">
+            <input id="symbolInput" placeholder="AAPL 或 01398">
+            <button class="mini" id="addSymbolBtn">添加</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>代码</th>
+                <th>名称</th>
+                <th>现价</th>
+                <th>涨跌幅</th>
+                <th>盘前/盘后价</th>
+                <th>扩展盘涨幅</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="watchStockBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const STORAGE_KEY = "qdii-monitor-plus-v1";
+    const DEFAULT_CONFIG = {
+      refreshSeconds: 60,
+      alertPercent: 2,
+      soundAlert: true,
+      selectedFund: "040046",
+      stockWatch: ["AAPL", "MSFT", "NVDA", "TSLA"],
+      funds: [
+        { code: "040046", alias: "华安纳斯达克100ETF联接A", shares: 0, cost: 0, fee: 0 },
+        { code: "000041", alias: "华夏全球精选QDII", shares: 0, cost: 0, fee: 0 },
+        { code: "513100", alias: "纳指ETF国泰", shares: 0, cost: 0, fee: 0 }
+      ]
+    };
+    const THEME_SEEDS = {
+      CPO: ["中际旭创", "新易盛", "天孚通信", "光迅科技", "源杰科技"],
+      光模块: ["中际旭创", "新易盛", "天孚通信", "光迅科技", "源杰科技"],
+      存储芯片: ["兆易创新", "佰维存储", "江波龙", "德明利", "澜起科技"],
+      半导体: ["中芯国际", "北方华创", "中微公司", "寒武纪", "海光信息"],
+      AI算力: ["工业富联", "浪潮信息", "中际旭创", "新易盛", "寒武纪"],
+      新能源车: ["特斯拉", "比亚迪", "宁德时代", "理想汽车", "小鹏汽车"]
+    };
+    const GLOBAL_INDEXES = [
+      { market: "美股", secid: "100.NDX", name: "纳斯达克100" },
+      { market: "美股", secid: "100.SPX", name: "标普500" },
+      { market: "美股", secid: "100.DJIA", name: "道琼斯" },
+      { market: "A股", secid: "1.000001", name: "上证指数" },
+      { market: "A股", secid: "0.399001", name: "深证成指" },
+      { market: "A股", secid: "0.399006", name: "创业板指" },
+      { market: "港股", secid: "100.HSI", name: "恒生指数" },
+      { market: "港股", secid: "124.HSTECH", name: "恒生科技" },
+      { market: "港股", secid: "100.HSCEI", name: "国企指数" },
+      { market: "日股", secid: "100.N225", name: "日经225" },
+      { market: "韩股", secid: "100.KS11", name: "韩国KOSPI" },
+      { market: "台股", secid: "100.TWII", name: "台湾加权" }
+    ];
+    const RESOURCE_QUOTES = [
+      { group: "贵金属", secid: "101.GC00Y", name: "COMEX黄金", unit: "美元/盎司" },
+      { group: "贵金属", secid: "101.SI00Y", name: "COMEX白银", unit: "美分/盎司" },
+      { group: "能源", secid: "112.B00Y", name: "布伦特原油", unit: "美元/桶" },
+      { group: "能源", secid: "102.CL00Y", name: "NYMEX原油", unit: "美元/桶" },
+      { group: "有色金属", secid: "109.LCPT", name: "伦铜", unit: "美元/吨" },
+      { group: "有色金属", secid: "109.LALT", name: "伦铝", unit: "美元/吨" },
+      { group: "有色金属", secid: "109.LZNT", name: "伦锌", unit: "美元/吨" },
+      { group: "有色金属", secid: "109.LNKT", name: "伦镍", unit: "千美元/吨" },
+      { group: "有色金属", secid: "109.LTNT", name: "伦锡", unit: "百美元/吨" },
+      { group: "有色金属", secid: "109.LLDT", name: "伦铅", unit: "美元/吨" }
+    ];
+
+    const state = {
+      config: loadConfig(),
+      quotes: new Map(),
+      holdings: new Map(),
+      history: new Map(),
+      tradeInfo: new Map(),
+      indices: new Map(),
+      resources: new Map(),
+      indexHistory: new Map(),
+      selectedIndex: "100.NDX",
+      stocks: new Map(),
+      selectedHoldingCodes: [],
+      timer: null,
+      refreshing: false
+    };
+
+    const els = {
+      status: document.querySelector("#status"),
+      searchInput: document.querySelector("#searchInput"),
+      searchBtn: document.querySelector("#searchBtn"),
+      searchResults: document.querySelector("#searchResults"),
+      themeBtns: document.querySelectorAll("[data-theme]"),
+      refreshBtn: document.querySelector("#refreshBtn"),
+      intervalInput: document.querySelector("#intervalInput"),
+      alertInput: document.querySelector("#alertInput"),
+      soundInput: document.querySelector("#soundInput"),
+      removeBtn: document.querySelector("#removeBtn"),
+      fundBody: document.querySelector("#fundBody"),
+      historyRange: document.querySelector("#historyRange"),
+      historyBtn: document.querySelector("#historyBtn"),
+      historyChart: document.querySelector("#historyChart"),
+      historyTooltip: document.querySelector("#historyTooltip"),
+      historySummary: document.querySelector("#historySummary"),
+      historyBody: document.querySelector("#historyBody"),
+      signalTitle: document.querySelector("#signalTitle"),
+      signalBody: document.querySelector("#signalBody"),
+      holdingBody: document.querySelector("#holdingBody"),
+      holdingTitle: document.querySelector("#holdingTitle"),
+      rebalanceTitle: document.querySelector("#rebalanceTitle"),
+      rebalanceBody: document.querySelector("#rebalanceBody"),
+      indexBody: document.querySelector("#indexBody"),
+      indexHistoryRange: document.querySelector("#indexHistoryRange"),
+      indexHistoryBtn: document.querySelector("#indexHistoryBtn"),
+      indexHistoryChart: document.querySelector("#indexHistoryChart"),
+      indexHistoryTooltip: document.querySelector("#indexHistoryTooltip"),
+      indexHistorySummary: document.querySelector("#indexHistorySummary"),
+      indexHistoryBody: document.querySelector("#indexHistoryBody"),
+      resourceBody: document.querySelector("#resourceBody"),
+      stockBody: document.querySelector("#stockBody"),
+      watchStockBody: document.querySelector("#watchStockBody"),
+      symbolInput: document.querySelector("#symbolInput"),
+      addSymbolBtn: document.querySelector("#addSymbolBtn"),
+      totalCost: document.querySelector("#totalCost"),
+      totalValue: document.querySelector("#totalValue"),
+      totalProfit: document.querySelector("#totalProfit"),
+      totalProfitRate: document.querySelector("#totalProfitRate")
+    };
+
+    function loadConfig() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+        return { ...structuredClone(DEFAULT_CONFIG), ...saved, funds: saved?.funds || DEFAULT_CONFIG.funds };
+      } catch {
+        return structuredClone(DEFAULT_CONFIG);
+      }
+    }
+
+    function saveConfig() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.config));
+    }
+
+    function jsonp(url, callbackParam, timeoutMs = 10000, fixedName = "") {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        const callbackName = fixedName || `cb_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        let previous;
+        if (fixedName) previous = window[fixedName];
+        const cleanup = () => {
+          script.remove();
+          if (fixedName) window[fixedName] = previous;
+          else delete window[callbackName];
+        };
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error("请求超时"));
+        }, timeoutMs);
+        window[callbackName] = data => {
+          clearTimeout(timer);
+          cleanup();
+          resolve(data);
+        };
+        script.onerror = () => {
+          clearTimeout(timer);
+          cleanup();
+          reject(new Error("网络错误或接口不可用"));
+        };
+        script.src = `${url}${url.includes("?") ? "&" : "?"}${callbackParam}=${callbackName}`;
+        document.body.appendChild(script);
+      });
+    }
+
+    function scriptVar(url, varName, timeoutMs = 10000) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        const timer = setTimeout(() => {
+          script.remove();
+          reject(new Error("请求超时"));
+        }, timeoutMs);
+        script.onload = () => {
+          clearTimeout(timer);
+          const value = window[varName];
+          script.remove();
+          resolve(value);
+        };
+        script.onerror = () => {
+          clearTimeout(timer);
+          script.remove();
+          reject(new Error("网络错误或接口不可用"));
+        };
+        script.src = url;
+        document.body.appendChild(script);
+      });
+    }
+
+    function loadScript(url, timeoutMs = 10000) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        const timer = setTimeout(() => {
+          script.remove();
+          reject(new Error("请求超时"));
+        }, timeoutMs);
+        script.onload = () => {
+          clearTimeout(timer);
+          script.remove();
+          resolve();
+        };
+        script.onerror = () => {
+          clearTimeout(timer);
+          script.remove();
+          reject(new Error("网络错误或接口不可用"));
+        };
+        script.src = url;
+        document.body.appendChild(script);
+      });
+    }
+
+    async function fetchFundQuote(code) {
+      try {
+        const data = await jsonp(`https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`, "", 9000, "jsonpgz");
+        const quote = {
+          code,
+          name: data?.name || "",
+          navDate: data?.jzrq || "",
+          nav: toNumber(data?.dwjz),
+          estimate: toNumber(data?.gsz),
+          estimateChange: toNumber(data?.gszzl),
+          estimateTime: data?.gztime || "",
+          error: ""
+        };
+        if (!quote.name && !quote.nav && !quote.estimate) quote.error = "未获取到估值数据";
+        return quote;
+      } catch (error) {
+        return { code, error: error.message };
+      }
+    }
+
+    async function fetchFundSearch(keyword) {
+      const url = `https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?m=1&key=${encodeURIComponent(keyword)}`;
+      const data = await jsonp(url, "callback", 10000);
+      return data?.Datas || [];
+    }
+
+    async function fetchFundTradeInfo(code) {
+      try {
+        window.fund_minsg = "";
+        window.fund_Rate = "";
+        window.fund_sourceRate = "";
+        await loadScript(`https://fund.eastmoney.com/pingzhongdata/${code}.js?v=${Date.now()}`, 12000);
+        return {
+          code,
+          minBuy: window.fund_minsg ? `${window.fund_minsg}元` : "",
+          rate: window.fund_Rate ? `${window.fund_Rate}%` : "",
+          sourceRate: window.fund_sourceRate ? `${window.fund_sourceRate}%` : "",
+          feeUrl: `https://fundf10.eastmoney.com/jjfl_${code}.html`,
+          error: ""
+        };
+      } catch (error) {
+        return {
+          code,
+          minBuy: "",
+          rate: "",
+          sourceRate: "",
+          feeUrl: `https://fundf10.eastmoney.com/jjfl_${code}.html`,
+          error: error.message
+        };
+      }
+    }
+
+    async function fetchHoldings(code) {
+      try {
+        delete window.apidata;
+        const data = await scriptVar(`https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=jjcc&code=${code}&topline=10&year=&month=&rt=${Date.now()}`, "apidata");
+        const parsed = parseHoldings(data?.content || "");
+        return { code, date: parsed.date, rows: parsed.rows, previousDate: parsed.previousDate, previousRows: parsed.previousRows, error: parsed.rows.length ? "" : "暂无持仓明细" };
+      } catch (error) {
+        return { code, date: "", rows: [], previousDate: "", previousRows: [], error: error.message };
+      }
+    }
+
+    async function fetchHistory(code, days) {
+      try {
+        const pageSize = Math.max(30, Math.min(370, Number(days) || 90));
+        delete window.apidata;
+        const f10 = await scriptVar(`https://fundf10.eastmoney.com/F10DataApi.aspx?type=lsjz&code=${code}&page=1&per=${pageSize}&sdate=&edate=&rt=${Date.now()}`, "apidata");
+        const rows = parseHistoryHtml(f10?.content || "");
+        if (rows.length) return { code, rows, total: f10?.records || rows.length, error: "" };
+      } catch {}
+
+      try {
+        const pageSize = Math.max(30, Math.min(370, Number(days) || 90));
+        const data = await jsonp(`https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=${pageSize}&startDate=&endDate=`, "callback", 12000);
+        const rows = (data?.Data?.LSJZList || []).map(row => ({
+          date: row.FSRQ || "",
+          nav: toNumber(row.DWJZ),
+          totalNav: toNumber(row.LJJZ),
+          changePct: Number(row.JZZZL),
+          buyStatus: row.SGZT || "",
+          sellStatus: row.SHZT || ""
+        })).filter(row => row.date && row.nav);
+        return { code, rows, total: data?.TotalCount || rows.length, error: rows.length ? "" : "暂无历史净值" };
+      } catch (error) {
+        return { code, rows: [], total: 0, error: error.message };
+      }
+    }
+
+    function parseHistoryHtml(html) {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      return [...doc.querySelectorAll("tbody tr")].map(tr => {
+        const cells = [...tr.querySelectorAll("td")].map(td => td.textContent.trim());
+        return {
+          date: cells[0] || "",
+          nav: toNumber(cells[1]),
+          totalNav: toNumber(cells[2]),
+          changePct: Number(String(cells[3] || "").replace("%", "")),
+          buyStatus: cells[4] || "",
+          sellStatus: cells[5] || ""
+        };
+      }).filter(row => row.date && row.nav);
+    }
+
+    function parseHoldings(html) {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const boxes = [...doc.querySelectorAll(".boxitem")].filter(box => box.querySelector("tbody tr"));
+      const current = parseHoldingBox(boxes[0]);
+      const previous = parseHoldingBox(boxes[1]);
+      return {
+        date: current.date,
+        rows: current.rows,
+        previousDate: previous.date,
+        previousRows: previous.rows
+      };
+    }
+
+    function parseHoldingBox(box) {
+      if (!box) return { date: "", rows: [] };
+      const date = box.querySelector("font.px12")?.textContent?.trim() || "";
+      const rows = [...box.querySelectorAll("tbody tr")].slice(0, 10).map(tr => {
+        const cells = [...tr.querySelectorAll("td")].map(td => td.textContent.trim());
+        const link = tr.querySelector("a[href*='unify/r/']");
+        const secid = (link?.getAttribute("href") || "").match(/r\/([^'"?]+)/)?.[1] || "";
+        return {
+          rank: cells[0] || "",
+          secid,
+          symbol: cells[1] || "",
+          name: cells[2] || "",
+          ratio: cells.at(-3) || "",
+          shares: cells.at(-2) || "",
+          value: cells.at(-1) || ""
+        };
+      }).filter(row => row.symbol);
+      return { date, rows };
+    }
+
+    async function fetchStockQuotes(secids) {
+      const unique = [...new Set(secids.filter(Boolean))];
+      if (!unique.length) return [];
+      const chunks = [];
+      for (let i = 0; i < unique.length; i += 50) chunks.push(unique.slice(i, i + 50));
+      const all = [];
+      for (const chunk of chunks) {
+        const fields = "f12,f13,f14,f2,f3,f4,f6,f152,f49,f51,f50,f48,f43,f44,f45,f169,f170,f171";
+        const url = `https://push2.eastmoney.com/api/qt/ulist.np/get?fields=${fields}&secids=${chunk.join(",")}`;
+        try {
+          const data = await jsonp(url, "cb", 10000);
+          all.push(...(data?.data?.diff || []));
+        } catch {}
+      }
+      return all.map(normalizeStock);
+    }
+
+    async function fetchIndexHistory(secid, days) {
+      try {
+        const lmt = Math.max(30, Math.min(370, Number(days) || 90));
+        const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=0&beg=20200101&end=20500101&lmt=${lmt}`;
+        const data = await jsonp(url, "cb", 12000);
+        const rows = (data?.data?.klines || []).map(line => {
+          const cells = line.split(",");
+          return {
+            date: cells[0],
+            open: toNumber(cells[1]),
+            close: toNumber(cells[2]),
+            high: toNumber(cells[3]),
+            low: toNumber(cells[4]),
+            volume: toNumber(cells[5]),
+            changePct: Number(cells[8]),
+            change: toNumber(cells[9])
+          };
+        }).filter(row => row.date && row.close);
+        return { secid, rows, name: data?.data?.name || "", error: rows.length ? "" : "暂无指数历史数据" };
+      } catch (error) {
+        return { secid, rows: [], name: "", error: error.message };
+      }
+    }
+
+    function normalizeStock(item) {
+      const scale = Number(item.f152) || 2;
+      const div = 10 ** scale;
+      const price = scaled(item.f2, div);
+      const changePct = scaled(item.f3, 100);
+      const change = scaled(item.f4, div);
+      const extPrice = firstValid([scaled(item.f49, div), scaled(item.f51, div), scaled(item.f50, div), scaled(item.f48, div)]);
+      const extPct = firstValid([scaled(item.f171, 100), scaled(item.f169, 100)]);
+      return {
+        secid: item.f13 ? `${item.f13}.${item.f12}` : "",
+        symbol: item.f12,
+        name: item.f14 || "",
+        price,
+        changePct,
+        change,
+        amount: Number(item.f6),
+        extPrice,
+        extPct
+      };
+    }
+
+    function secidFromSymbol(symbol) {
+      const s = String(symbol || "").trim().toUpperCase();
+      if (!s) return "";
+      if (/^\d{5}$/.test(s)) return `116.${s}`;
+      if (/^[A-Z.]{1,8}$/.test(s)) return `105.${s}`;
+      return s.includes(".") ? s : `105.${s}`;
+    }
+
+    function secidFromFundCode(code) {
+      const s = String(code || "").trim();
+      if (!/^\d{6}$/.test(s)) return "";
+      if (/^[56]/.test(s)) return `1.${s}`;
+      if (/^[0123]/.test(s)) return `0.${s}`;
+      return "";
+    }
+
+    function toNumber(value) {
+      const n = Number(String(value ?? "").replace(/,/g, ""));
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function scaled(value, div) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n === 0 || n === -1) return null;
+      return n / div;
+    }
+
+    function firstValid(values) {
+      return values.find(value => Number.isFinite(value)) ?? null;
+    }
+
+    function parsePercent(value) {
+      const n = Number(String(value || "").replace(/[% ,]/g, ""));
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    function money(value) {
+      if (!Number.isFinite(value)) return "--";
+      return value.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function pct(value) {
+      if (!Number.isFinite(value)) return "--";
+      return `${value.toFixed(2)}%`;
+    }
+
+    function cls(value) {
+      if (!Number.isFinite(value)) return "";
+      if (value > 0) return "up";
+      if (value < 0) return "down";
+      return "";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+
+    function renderFunds() {
+      els.fundBody.innerHTML = "";
+      let totalCost = 0;
+      let totalValue = 0;
+
+      for (const fund of state.config.funds) {
+        const quote = state.quotes.get(fund.code) || {};
+        const trade = state.tradeInfo.get(fund.code) || {};
+        const histKey = [...state.history.keys()].find(key => key.startsWith(`${fund.code}:`));
+        const latestHistory = histKey ? state.history.get(histKey)?.rows?.[0] : null;
+        const buyStatus = latestHistory?.buyStatus || trade.buyStatus || "";
+        const nav = quote.estimate || quote.nav || 0;
+        const shares = Number(fund.shares) || 0;
+        const cost = Number(fund.cost) || 0;
+        const fee = Number(fund.fee) || 0;
+        const value = shares * nav;
+        const profit = value - cost - fee;
+        const profitRate = cost + fee > 0 ? profit / (cost + fee) * 100 : NaN;
+        totalCost += cost + fee;
+        totalValue += value;
+
+        const selected = state.config.selectedFund === fund.code;
+        const row = document.createElement("tr");
+        row.className = selected ? "selected" : "";
+        row.innerHTML = `
+          <td><input type="checkbox" data-check="${fund.code}"></td>
+          <td class="code">${fund.code}</td>
+          <td class="name" title="${escapeHtml(quote.name || fund.alias)}">${escapeHtml(quote.name || fund.alias || "")}</td>
+          <td>${nav ? money(nav) : "--"}</td>
+          <td class="${cls(quote.estimateChange)}">${Number.isFinite(quote.estimateChange) ? pct(quote.estimateChange) : "--"}</td>
+          <td>${escapeHtml(quote.estimateTime || "")}</td>
+          <td>${quote.nav ? money(quote.nav) : "--"} <span class="muted">${escapeHtml(quote.navDate || "")}</span></td>
+          <td>${escapeHtml(buyStatus || "--")}</td>
+          <td>${renderTradeLimitCell(fund.code, trade)}</td>
+          <td><input data-edit="${fund.code}" data-field="shares" type="number" min="0" step="0.01" value="${fund.shares || ""}"></td>
+          <td><input data-edit="${fund.code}" data-field="cost" type="number" min="0" step="0.01" value="${fund.cost || ""}"></td>
+          <td><input data-edit="${fund.code}" data-field="fee" type="number" min="0" step="0.01" value="${fund.fee || ""}"></td>
+          <td>${value ? money(value) : "--"}</td>
+          <td class="${cls(profit)}">${shares ? money(profit) : "--"}</td>
+          <td class="${cls(profitRate)}">${Number.isFinite(profitRate) ? pct(profitRate) : "--"}</td>
+          <td class="${quote.error ? "warn" : "muted"}">${escapeHtml(quote.error || "正常")}</td>
+        `;
+        row.addEventListener("click", event => {
+          if (event.target.matches("input")) return;
+          state.config.selectedFund = fund.code;
+          saveConfig();
+          renderFunds();
+          renderHistory();
+          renderSignals();
+          renderHoldings();
+          renderRebalance();
+          refreshSelectedHistory();
+          refreshSelectedHoldings();
+        });
+        els.fundBody.appendChild(row);
+      }
+
+      const totalProfit = totalValue - totalCost;
+      const totalRate = totalCost > 0 ? totalProfit / totalCost * 100 : NaN;
+      els.totalCost.textContent = totalCost ? money(totalCost) : "--";
+      els.totalValue.textContent = totalValue ? money(totalValue) : "--";
+      els.totalProfit.textContent = totalCost ? money(totalProfit) : "--";
+      els.totalProfit.className = `value ${cls(totalProfit)}`;
+      els.totalProfitRate.textContent = Number.isFinite(totalRate) ? pct(totalRate) : "--";
+      els.totalProfitRate.className = `value ${cls(totalRate)}`;
+    }
+
+    function renderHoldings() {
+      const code = state.config.selectedFund;
+      const data = state.holdings.get(code);
+      els.holdingTitle.textContent = code ? `${code}${data?.date ? `，截止 ${data.date}` : ""}` : "选择一只基金查看持股";
+      els.holdingBody.innerHTML = "";
+      if (!data || data.error) {
+        els.holdingBody.innerHTML = `<tr><td colspan="8" class="muted">${escapeHtml(data?.error || "等待刷新")}</td></tr>`;
+        return;
+      }
+      for (const row of data.rows) {
+        const stock = state.stocks.get(row.secid);
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(row.rank)}</td>
+          <td class="code">${escapeHtml(row.symbol)}</td>
+          <td>${escapeHtml(row.name)}</td>
+          <td>${escapeHtml(row.ratio)}</td>
+          <td>${escapeHtml(row.shares)}</td>
+          <td>${escapeHtml(row.value)}</td>
+          <td>${stock?.price ? money(stock.price) : "--"}</td>
+          <td class="${cls(stock?.changePct)}">${Number.isFinite(stock?.changePct) ? pct(stock.changePct) : "--"}</td>
+        `;
+        els.holdingBody.appendChild(tr);
+      }
+    }
+
+    function renderRebalance() {
+      const code = state.config.selectedFund;
+      const data = state.holdings.get(code);
+      els.rebalanceTitle.textContent = data?.date && data?.previousDate
+        ? `${code}：${data.previousDate} -> ${data.date}`
+        : "显示最新一期与上一期持仓变化";
+      els.rebalanceBody.innerHTML = "";
+      if (!data || data.error) {
+        els.rebalanceBody.innerHTML = `<tr><td colspan="8" class="muted">${escapeHtml(data?.error || "等待刷新")}</td></tr>`;
+        return;
+      }
+      if (!data.previousRows?.length) {
+        els.rebalanceBody.innerHTML = `<tr><td colspan="8" class="muted">暂无上一期持仓，无法对比</td></tr>`;
+        return;
+      }
+
+      const changes = buildRebalanceRows(data.rows, data.previousRows);
+      if (!changes.length) {
+        els.rebalanceBody.innerHTML = `<tr><td colspan="8" class="muted">前十大持仓未发现变化</td></tr>`;
+        return;
+      }
+      for (const row of changes) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td class="${row.statusClass}">${escapeHtml(row.status)}</td>
+          <td class="code">${escapeHtml(row.symbol)}</td>
+          <td>${escapeHtml(row.name)}</td>
+          <td>${Number.isFinite(row.beforeRatio) ? pct(row.beforeRatio) : "--"}</td>
+          <td>${Number.isFinite(row.afterRatio) ? pct(row.afterRatio) : "--"}</td>
+          <td class="${cls(row.delta)}">${Number.isFinite(row.delta) ? pct(row.delta) : "--"}</td>
+          <td>${escapeHtml(row.beforeValue || "--")}</td>
+          <td>${escapeHtml(row.afterValue || "--")}</td>
+        `;
+        els.rebalanceBody.appendChild(tr);
+      }
+    }
+
+    function buildRebalanceRows(currentRows, previousRows) {
+      const map = new Map();
+      for (const row of previousRows || []) {
+        map.set(row.symbol, { symbol: row.symbol, name: row.name, before: row, after: null });
+      }
+      for (const row of currentRows || []) {
+        const item = map.get(row.symbol) || { symbol: row.symbol, name: row.name, before: null, after: null };
+        item.after = row;
+        item.name = row.name || item.name;
+        map.set(row.symbol, item);
+      }
+      return [...map.values()].map(item => {
+        const beforeRatio = item.before ? parsePercent(item.before.ratio) : NaN;
+        const afterRatio = item.after ? parsePercent(item.after.ratio) : NaN;
+        const delta = (Number.isFinite(afterRatio) ? afterRatio : 0) - (Number.isFinite(beforeRatio) ? beforeRatio : 0);
+        let status = "不变";
+        let statusClass = "muted";
+        if (!item.before && item.after) {
+          status = "新增";
+          statusClass = "up";
+        } else if (item.before && !item.after) {
+          status = "剔除";
+          statusClass = "down";
+        } else if (delta > 0.01) {
+          status = "加仓";
+          statusClass = "up";
+        } else if (delta < -0.01) {
+          status = "减仓";
+          statusClass = "down";
+        }
+        return {
+          status,
+          statusClass,
+          symbol: item.symbol,
+          name: item.name,
+          beforeRatio,
+          afterRatio,
+          delta,
+          beforeValue: item.before?.value || "",
+          afterValue: item.after?.value || ""
+        };
+      }).filter(row => row.status !== "不变")
+        .sort((a, b) => Math.abs(b.delta || 0) - Math.abs(a.delta || 0));
+    }
+
+    function renderHistory() {
+      const code = state.config.selectedFund;
+      const days = Number(els.historyRange.value) || 90;
+      const key = `${code}:${days}`;
+      const data = state.history.get(key);
+      els.historyBody.innerHTML = "";
+      if (!data || data.error) {
+        els.historySummary.textContent = data?.error || "等待刷新历史净值";
+        els.historyBody.innerHTML = `<tr><td colspan="6" class="muted">${escapeHtml(data?.error || "等待刷新历史净值")}</td></tr>`;
+        drawHistoryChart([]);
+        return;
+      }
+
+      const rowsAsc = [...data.rows].reverse();
+      const first = rowsAsc[0];
+      const last = rowsAsc.at(-1);
+      const rangeReturn = first?.nav ? (last.nav / first.nav - 1) * 100 : NaN;
+      const maxNav = Math.max(...rowsAsc.map(row => row.nav));
+      const minNav = Math.min(...rowsAsc.map(row => row.nav));
+      els.historySummary.innerHTML = `
+        <span>${code} 近 ${days} 天</span>
+        <span>最新净值 ${last ? money(last.nav) : "--"}</span>
+        <span>区间收益 <b class="${cls(rangeReturn)}">${Number.isFinite(rangeReturn) ? pct(rangeReturn) : "--"}</b></span>
+        <span>最高 ${money(maxNav)}</span>
+        <span>最低 ${money(minNav)}</span>
+      `;
+
+      for (const row of data.rows.slice(0, 40)) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(row.date)}</td>
+          <td>${money(row.nav)}</td>
+          <td>${row.totalNav ? money(row.totalNav) : "--"}</td>
+          <td class="${cls(row.changePct)}">${Number.isFinite(row.changePct) ? pct(row.changePct) : "--"}</td>
+          <td>${escapeHtml(row.buyStatus)}</td>
+          <td>${escapeHtml(row.sellStatus)}</td>
+        `;
+        els.historyBody.appendChild(tr);
+      }
+      drawHistoryChart(rowsAsc);
+    }
+
+    function renderTradeLimitCell(code, trade) {
+      const minBuy = trade?.minBuy ? `起购 ${escapeHtml(trade.minBuy)}` : "起购 --";
+      const feeUrl = trade?.feeUrl || `https://fundf10.eastmoney.com/jjfl_${code}.html`;
+      return `${minBuy}<br><a class="inline-link" href="${feeUrl}" target="_blank">查看申购限额</a>`;
+    }
+
+    function renderSignals() {
+      const code = state.config.selectedFund;
+      const fund = state.config.funds.find(item => item.code === code);
+      const quote = state.quotes.get(code) || {};
+      const days = Number(els.historyRange.value) || 90;
+      const history = state.history.get(`${code}:${days}`);
+      const holding = state.holdings.get(code);
+      const fundStock = state.stocks.get(secidFromFundCode(code));
+      const primary = Number.isFinite(quote.estimateChange) ? quote.estimateChange : NaN;
+      const rows = [];
+
+      if (Number.isFinite(primary)) {
+        rows.push({
+          name: "天天基金估算",
+          value: primary,
+          meta: quote.estimateTime || "--",
+          note: "当前主估值源",
+          base: true
+        });
+      }
+
+      const latestHistory = history?.rows?.[0];
+      if (latestHistory && Number.isFinite(latestHistory.changePct)) {
+        rows.push({
+          name: "最新净值日涨跌",
+          value: latestHistory.changePct,
+          meta: latestHistory.date,
+          note: "正式净值的上一交易日涨跌，日期可能滞后"
+        });
+      }
+
+      const holdingSignals = calcHoldingSignals(holding);
+      if (Number.isFinite(holdingSignals.regular)) {
+        rows.push({
+          name: "持仓前十加权",
+          value: holdingSignals.regular,
+          meta: `覆盖 ${holdingSignals.coverage.toFixed(2)}%`,
+          note: "用披露持仓权重 x 个股实时涨跌估算"
+        });
+      }
+      if (Number.isFinite(holdingSignals.extended)) {
+        rows.push({
+          name: "持仓扩展盘加权",
+          value: holdingSignals.extended,
+          meta: `覆盖 ${holdingSignals.extCoverage.toFixed(2)}%`,
+          note: "用披露持仓权重 x 盘前/盘后涨跌估算"
+        });
+      }
+
+      if (fundStock && Number.isFinite(fundStock.changePct)) {
+        rows.push({
+          name: "场内交易价格",
+          value: fundStock.changePct,
+          meta: fundStock.price ? `现价 ${money(fundStock.price)}` : "--",
+          note: "仅 ETF/LOF 等场内基金可用，含折溢价"
+        });
+      }
+
+      els.signalTitle.textContent = code ? `${code} ${fund?.alias || quote.name || ""}` : "选择一只基金后对比信号误差";
+      els.signalBody.innerHTML = rows.length ? "" : `<tr><td colspan="5" class="muted">等待估值、历史净值和持仓个股行情</td></tr>`;
+      for (const row of rows) {
+        const error = Number.isFinite(primary) && Number.isFinite(row.value) ? row.value - primary : NaN;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(row.name)}</td>
+          <td class="${cls(row.value)}">${Number.isFinite(row.value) ? pct(row.value) : "--"}</td>
+          <td class="${cls(error)}">${row.base ? "基准" : Number.isFinite(error) ? pct(error) : "--"}</td>
+          <td>${escapeHtml(row.meta)}</td>
+          <td class="muted">${escapeHtml(row.note)}</td>
+        `;
+        els.signalBody.appendChild(tr);
+      }
+    }
+
+    function calcHoldingSignals(holding) {
+      let regular = 0;
+      let coverage = 0;
+      let extended = 0;
+      let extCoverage = 0;
+      for (const row of holding?.rows || []) {
+        const weight = parsePercent(row.ratio);
+        const stock = state.stocks.get(row.secid);
+        if (!Number.isFinite(weight) || !stock) continue;
+        if (Number.isFinite(stock.changePct)) {
+          regular += weight * stock.changePct / 100;
+          coverage += weight;
+        }
+        if (Number.isFinite(stock.extPct)) {
+          extended += weight * stock.extPct / 100;
+          extCoverage += weight;
+        }
+      }
+      return {
+        regular: coverage ? regular : NaN,
+        coverage,
+        extended: extCoverage ? extended : NaN,
+        extCoverage
+      };
+    }
+
+    function renderIndexHistory() {
+      const days = Number(els.indexHistoryRange.value) || 90;
+      const item = GLOBAL_INDEXES.find(index => index.secid === state.selectedIndex) || GLOBAL_INDEXES[0];
+      const data = state.indexHistory.get(`${item.secid}:${days}`);
+      els.indexHistoryBody.innerHTML = "";
+      if (!data || data.error) {
+        els.indexHistorySummary.textContent = data?.error || `${item.name} 等待刷新历史`;
+        els.indexHistoryBody.innerHTML = `<tr><td colspan="6" class="muted">${escapeHtml(data?.error || "等待刷新指数历史")}</td></tr>`;
+        drawLineChart(els.indexHistoryChart, [], "暂无指数历史数据");
+        return;
+      }
+      const rows = data.rows;
+      const first = rows[0];
+      const last = rows.at(-1);
+      const rangeReturn = first?.close ? (last.close / first.close - 1) * 100 : NaN;
+      const maxClose = Math.max(...rows.map(row => row.close));
+      const minClose = Math.min(...rows.map(row => row.close));
+      els.indexHistorySummary.innerHTML = `
+        <span>${escapeHtml(item.market)} · ${escapeHtml(item.name)}</span>
+        <span>最新 ${last ? money(last.close) : "--"}</span>
+        <span>区间涨幅 <b class="${cls(rangeReturn)}">${Number.isFinite(rangeReturn) ? pct(rangeReturn) : "--"}</b></span>
+        <span>最高 ${money(maxClose)}</span>
+        <span>最低 ${money(minClose)}</span>
+      `;
+      for (const row of rows.slice().reverse().slice(0, 40)) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(row.date)}</td>
+          <td>${money(row.close)}</td>
+          <td class="${cls(row.changePct)}">${Number.isFinite(row.changePct) ? pct(row.changePct) : "--"}</td>
+          <td class="${cls(row.change)}">${Number.isFinite(row.change) ? money(row.change) : "--"}</td>
+          <td>${money(row.high)}</td>
+          <td>${money(row.low)}</td>
+        `;
+        els.indexHistoryBody.appendChild(tr);
+      }
+      drawLineChart(
+        els.indexHistoryChart,
+        rows.map(row => ({ date: row.date, value: row.close, changePct: row.changePct, change: row.change })),
+        "暂无指数历史数据"
+      );
+    }
+
+    async function refreshIndexHistory(useCache = true) {
+      const days = Number(els.indexHistoryRange.value) || 90;
+      const key = `${state.selectedIndex}:${days}`;
+      if (useCache && state.indexHistory.has(key)) {
+        renderIndexHistory();
+        return;
+      }
+      const item = GLOBAL_INDEXES.find(index => index.secid === state.selectedIndex) || GLOBAL_INDEXES[0];
+      els.indexHistorySummary.textContent = `正在加载 ${item.name} 历史走势...`;
+      const data = await fetchIndexHistory(item.secid, days);
+      state.indexHistory.set(key, data);
+      renderIndexHistory();
+    }
+
+    function drawHistoryChart(rows) {
+      drawLineChart(
+        els.historyChart,
+        rows.map(row => ({ date: row.date, value: row.nav, changePct: row.changePct, change: null })),
+        "暂无历史净值数据"
+      );
+    }
+
+    function drawLineChart(canvas, rows, emptyText) {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(320, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(180, Math.floor(rect.height * dpr));
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const width = canvas.width / dpr;
+      const height = canvas.height / dpr;
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#fbfcfe";
+      ctx.fillRect(0, 0, width, height);
+      const pad = { left: 48, right: 18, top: 18, bottom: 34 };
+      const plotW = width - pad.left - pad.right;
+      const plotH = height - pad.top - pad.bottom;
+
+      ctx.strokeStyle = "#e1e6ef";
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#667085";
+      ctx.font = "12px Microsoft YaHei, Segoe UI, Arial";
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + plotH * i / 4;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+      }
+
+      if (!rows.length) {
+        ctx.fillText(emptyText, pad.left, pad.top + 28);
+        canvas._chartData = null;
+        return;
+      }
+      const values = rows.map(row => row.value);
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const span = max - min || 1;
+      const xAt = index => pad.left + (rows.length === 1 ? 0 : plotW * index / (rows.length - 1));
+      const yAt = value => pad.top + plotH - (value - min) / span * plotH;
+
+      ctx.strokeStyle = "#1957d2";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      rows.forEach((row, index) => {
+        const x = xAt(index);
+        const y = yAt(row.value);
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      const gradient = ctx.createLinearGradient(0, pad.top, 0, height - pad.bottom);
+      gradient.addColorStop(0, "rgba(25, 87, 210, .18)");
+      gradient.addColorStop(1, "rgba(25, 87, 210, 0)");
+      ctx.lineTo(xAt(rows.length - 1), height - pad.bottom);
+      ctx.lineTo(xAt(0), height - pad.bottom);
+      ctx.closePath();
+      ctx.fillStyle = gradient;
+      ctx.fill();
+
+      ctx.fillStyle = "#667085";
+      ctx.fillText(max.toFixed(4), 8, pad.top + 4);
+      ctx.fillText(min.toFixed(4), 8, height - pad.bottom + 4);
+      ctx.fillText(rows[0].date, pad.left, height - 10);
+      const endText = rows.at(-1).date;
+      ctx.fillText(endText, Math.max(pad.left, width - pad.right - ctx.measureText(endText).width), height - 10);
+      canvas._chartData = { rows, pad, plotW, plotH, min, max, width, height };
+    }
+
+    function bindChartPointer(canvas, tooltip, redraw) {
+      const showAt = event => {
+        const data = canvas._chartData;
+        if (!data?.rows?.length) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.max(data.pad.left, Math.min(event.clientX - rect.left, data.width - data.pad.right));
+        const ratio = data.plotW ? (x - data.pad.left) / data.plotW : 0;
+        const index = Math.max(0, Math.min(data.rows.length - 1, Math.round(ratio * (data.rows.length - 1))));
+        redraw();
+        drawChartPointer(canvas, data.rows[index], index);
+        showChartTooltip(canvas, tooltip, data.rows[index], index);
+      };
+      canvas.addEventListener("pointermove", showAt);
+      canvas.addEventListener("pointerdown", event => {
+        canvas.setPointerCapture?.(event.pointerId);
+        showAt(event);
+      });
+      canvas.addEventListener("pointerleave", () => {
+        tooltip.style.display = "none";
+        redraw();
+      });
+    }
+
+    function drawChartPointer(canvas, row, index) {
+      const data = canvas._chartData;
+      if (!data || !row) return;
+      const dpr = window.devicePixelRatio || 1;
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const x = data.pad.left + (data.rows.length === 1 ? 0 : data.plotW * index / (data.rows.length - 1));
+      const span = data.max - data.min || 1;
+      const y = data.pad.top + data.plotH - (row.value - data.min) / span * data.plotH;
+      ctx.strokeStyle = "rgba(31, 41, 55, .55)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(x, data.pad.top);
+      ctx.lineTo(x, data.height - data.pad.bottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#1957d2";
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    function showChartTooltip(canvas, tooltip, row, index) {
+      const data = canvas._chartData;
+      const x = data.pad.left + (data.rows.length === 1 ? 0 : data.plotW * index / (data.rows.length - 1));
+      const span = data.max - data.min || 1;
+      const y = data.pad.top + data.plotH - (row.value - data.min) / span * data.plotH;
+      tooltip.innerHTML = `
+        <div><strong>${escapeHtml(row.date)}</strong></div>
+        <div>数值：${money(row.value)}</div>
+        <div>涨幅：<span class="${cls(row.changePct)}">${Number.isFinite(row.changePct) ? pct(row.changePct) : "--"}</span></div>
+        <div>涨跌：<span class="${cls(row.change)}">${Number.isFinite(row.change) ? money(row.change) : "--"}</span></div>
+      `;
+      tooltip.style.display = "block";
+      const left = Math.min(Math.max(8, x + 12), data.width - 168);
+      const top = Math.min(Math.max(8, y - 48), data.height - 92);
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+    }
+
+    function renderStocks() {
+      renderIndexes();
+      renderResources();
+      const allRows = [...state.selectedHoldingCodes].map(secid => state.stocks.get(secid)).filter(Boolean);
+      els.stockBody.innerHTML = allRows.length ? "" : `<tr><td colspan="8" class="muted">等待持仓数据</td></tr>`;
+      for (const stock of allRows) {
+        els.stockBody.appendChild(stockRow(stock, true));
+      }
+
+      els.watchStockBody.innerHTML = "";
+      const watchSecids = state.config.stockWatch.map(secidFromSymbol);
+      for (const secid of watchSecids) {
+        const stock = state.stocks.get(secid) || { symbol: secid.split(".")[1], name: "", price: null, changePct: null, extPrice: null, extPct: null };
+        const row = stockRow(stock, false);
+        row.querySelector("button")?.addEventListener("click", () => {
+          state.config.stockWatch = state.config.stockWatch.filter(s => secidFromSymbol(s) !== secid);
+          saveConfig();
+          renderStocks();
+        });
+        els.watchStockBody.appendChild(row);
+      }
+    }
+
+    function renderResources() {
+      els.resourceBody.innerHTML = "";
+      for (const item of RESOURCE_QUOTES) {
+        const quote = state.resources.get(item.secid);
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(item.group)}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${quote?.price ? `${money(quote.price)} <span class="muted">${escapeHtml(item.unit)}</span>` : "--"}</td>
+          <td class="${cls(quote?.changePct)}">${Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--"}</td>
+          <td class="${cls(quote?.change)}">${Number.isFinite(quote?.change) ? money(quote.change) : "--"}</td>
+          <td>${quote?.amount ? money(quote.amount / 100000000) + "亿" : "--"}</td>
+        `;
+        els.resourceBody.appendChild(tr);
+      }
+    }
+
+    function renderIndexes() {
+      els.indexBody.innerHTML = "";
+      for (const item of GLOBAL_INDEXES) {
+        const quote = state.indices.get(item.secid);
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(item.market)}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${quote?.price ? money(quote.price) : "--"}</td>
+          <td class="${cls(quote?.changePct)}">${Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--"}</td>
+          <td class="${cls(quote?.change)}">${Number.isFinite(quote?.change) ? money(quote.change) : "--"}</td>
+          <td>${quote?.amount ? money(quote.amount / 100000000) + "亿" : "--"}</td>
+        `;
+        if (item.secid === state.selectedIndex) tr.classList.add("selected");
+        tr.addEventListener("click", () => {
+          state.selectedIndex = item.secid;
+          renderIndexes();
+          renderIndexHistory();
+          refreshIndexHistory();
+        });
+        els.indexBody.appendChild(tr);
+      }
+    }
+
+    function stockRow(stock, detailed) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = detailed ? `
+        <td class="code">${escapeHtml(stock.symbol)}</td>
+        <td>${escapeHtml(stock.name)}</td>
+        <td>${stock.price ? money(stock.price) : "--"}</td>
+        <td class="${cls(stock.changePct)}">${Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--"}</td>
+        <td class="${cls(stock.change)}">${Number.isFinite(stock.change) ? money(stock.change) : "--"}</td>
+        <td>${Number.isFinite(stock.extPrice) ? money(stock.extPrice) : "--"}</td>
+        <td class="${cls(stock.extPct)}">${Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--"}</td>
+        <td>${stock.amount ? money(stock.amount / 100000000) + "亿" : "--"}</td>
+      ` : `
+        <td class="code">${escapeHtml(stock.symbol)}</td>
+        <td>${escapeHtml(stock.name)}</td>
+        <td>${stock.price ? money(stock.price) : "--"}</td>
+        <td class="${cls(stock.changePct)}">${Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--"}</td>
+        <td>${Number.isFinite(stock.extPrice) ? money(stock.extPrice) : "--"}</td>
+        <td class="${cls(stock.extPct)}">${Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--"}</td>
+        <td><button class="mini">删除</button></td>
+      `;
+      return tr;
+    }
+
+    async function refreshNow() {
+      if (state.refreshing) return;
+      clearTimeout(state.timer);
+      state.refreshing = true;
+      els.refreshBtn.disabled = true;
+      els.status.textContent = "正在刷新基金、持仓和美股行情...";
+      saveSettings();
+
+      const alerts = [];
+      for (const fund of state.config.funds) {
+        const quote = await fetchFundQuote(fund.code);
+        state.quotes.set(fund.code, quote);
+        const trade = await fetchFundTradeInfo(fund.code);
+        state.tradeInfo.set(fund.code, trade);
+        if (!quote.error && Math.abs(quote.estimateChange) >= state.config.alertPercent) alerts.push(quote);
+        renderFunds();
+      }
+
+      await refreshSelectedHistory(false);
+
+      const holdingCodes = [];
+      for (const fund of state.config.funds) {
+        const holding = await fetchHoldings(fund.code);
+        state.holdings.set(fund.code, holding);
+        holding.rows.forEach(row => row.secid && holdingCodes.push(row.secid));
+      }
+      state.selectedHoldingCodes = [...new Set(holdingCodes)];
+
+      const watchSecids = state.config.stockWatch.map(secidFromSymbol);
+      const fundSecids = state.config.funds.map(fund => secidFromFundCode(fund.code)).filter(Boolean);
+      const indexSecids = GLOBAL_INDEXES.map(item => item.secid);
+      const resourceSecids = RESOURCE_QUOTES.map(item => item.secid);
+      const stocks = await fetchStockQuotes([...state.selectedHoldingCodes, ...watchSecids, ...fundSecids, ...indexSecids, ...resourceSecids]);
+      stocks.forEach(stock => {
+        const secid = stock.secid || state.selectedHoldingCodes.find(id => id.endsWith(`.${stock.symbol}`)) || watchSecids.find(id => id.endsWith(`.${stock.symbol}`)) || fundSecids.find(id => id.endsWith(`.${stock.symbol}`)) || `105.${stock.symbol}`;
+        if (indexSecids.includes(secid)) state.indices.set(secid, stock);
+        else if (resourceSecids.includes(secid)) state.resources.set(secid, stock);
+        else state.stocks.set(secid, stock);
+      });
+
+      renderFunds();
+      renderHistory();
+      renderSignals();
+      renderHoldings();
+      renderRebalance();
+      renderStocks();
+      const now = new Date().toLocaleString();
+      els.status.textContent = `上次刷新: ${now}，基金 ${state.config.funds.length} 只，个股 ${stocks.length} 只`;
+      if (alerts.length) notifyAlerts(alerts);
+      state.refreshing = false;
+      els.refreshBtn.disabled = false;
+      state.timer = setTimeout(refreshNow, Math.max(15, state.config.refreshSeconds) * 1000);
+    }
+
+    async function refreshSelectedHoldings() {
+      const code = state.config.selectedFund;
+      if (!code || state.holdings.has(code)) return;
+      const holding = await fetchHoldings(code);
+      state.holdings.set(code, holding);
+      const stocks = await fetchStockQuotes(holding.rows.map(row => row.secid));
+      stocks.forEach(stock => {
+        const secid = stock.secid || holding.rows.find(row => row.symbol === stock.symbol)?.secid;
+        if (secid) state.stocks.set(secid, stock);
+      });
+      renderSignals();
+      renderHoldings();
+      renderRebalance();
+    }
+
+    async function refreshSelectedHistory(useCache = true) {
+      const code = state.config.selectedFund;
+      if (!code) return;
+      const days = Number(els.historyRange.value) || 90;
+      const key = `${code}:${days}`;
+      if (useCache && state.history.has(key)) {
+        renderHistory();
+        return;
+      }
+      els.historySummary.textContent = "正在加载历史净值...";
+      const data = await fetchHistory(code, days);
+      state.history.set(key, data);
+      renderHistory();
+      renderSignals();
+    }
+
+    function notifyAlerts(quotes) {
+      if (state.config.soundAlert) {
+        try {
+          const audio = new AudioContext();
+          const osc = audio.createOscillator();
+          const gain = audio.createGain();
+          osc.connect(gain);
+          gain.connect(audio.destination);
+          osc.frequency.value = 880;
+          gain.gain.value = .08;
+          osc.start();
+          osc.stop(audio.currentTime + .16);
+        } catch {}
+      }
+      alert(quotes.slice(0, 8).map(q => `${q.code} ${q.name}: ${pct(q.estimateChange)}`).join("\n"));
+    }
+
+    async function searchFunds() {
+      const keyword = els.searchInput.value.trim();
+      if (!keyword) return;
+      els.searchResults.style.display = "block";
+      els.searchResults.innerHTML = `<div class="result-row"><span>搜索中...</span></div>`;
+      try {
+        const rows = await fetchThemeSearchRows(keyword);
+        const funds = buildFundSearchRows(rows);
+        els.searchResults.innerHTML = funds.length ? "" : `<div class="result-row"><span>没有找到基金。可换关键词，例如 CPO、存储芯片、光模块、半导体。</span></div>`;
+        funds.slice(0, 30).forEach(item => renderSearchFundRow(item));
+      } catch (error) {
+        els.searchResults.innerHTML = `<div class="result-row"><span class="warn">${escapeHtml(error.message)}</span></div>`;
+      }
+    }
+
+    async function fetchThemeSearchRows(keyword) {
+      const seeds = THEME_SEEDS[keyword] || [];
+      const all = [];
+      const primary = await fetchFundSearch(keyword);
+      all.push(...primary);
+      if (seeds.length) {
+        for (const seed of seeds) {
+          try {
+            all.push(...await fetchFundSearch(seed));
+          } catch {}
+        }
+      }
+      return all;
+    }
+
+    function buildFundSearchRows(rows) {
+      const map = new Map();
+      for (const item of rows) {
+        if (item.CATEGORY === 700 && /^\d{6}$/.test(item.CODE)) {
+          const info = item.FundBaseInfo || {};
+          map.set(item.CODE, {
+            code: item.CODE,
+            name: item.NAME,
+            desc: `${info.FTYPE || "基金"} ${info.DWJZ ? `净值 ${info.DWJZ}` : ""} ${info.FSRQ || ""}`,
+            source: "基金搜索"
+          });
+        }
+        for (const holder of item.StockHolder || []) {
+          if (!/^\d{6}$/.test(holder.Code)) continue;
+          if (!map.has(holder.Code)) {
+            map.set(holder.Code, {
+              code: holder.Code,
+              name: holder.Name,
+              desc: `持有/关联 ${item.NAME || item.CODE}`,
+              source: `${item.CATEGORYDESC || "标的"}关联`
+            });
+          }
+        }
+        for (const fund of item.ZTJJInfo || []) {
+          const code = fund.Code || fund.FCODE || fund.code;
+          const name = fund.Name || fund.SHORTNAME || fund.name;
+          if (!/^\d{6}$/.test(code || "")) continue;
+          if (!map.has(code)) {
+            map.set(code, {
+              code,
+              name,
+              desc: `主题基金 ${item.NAME || ""}`,
+              source: "主题关联"
+            });
+          }
+        }
+      }
+      return [...map.values()];
+    }
+
+    function renderSearchFundRow(item) {
+      const div = document.createElement("div");
+      div.className = "result-row";
+      div.innerHTML = `
+        <strong class="code">${escapeHtml(item.code)}</strong>
+        <div><strong>${escapeHtml(item.name)}</strong><br><span>${escapeHtml(item.source)} · ${escapeHtml(item.desc || "")}</span></div>
+        <button class="mini">添加</button>
+      `;
+      div.querySelector("button").addEventListener("click", () => {
+        addFund(item.code, item.name);
+        els.searchResults.style.display = "none";
+      });
+      els.searchResults.appendChild(div);
+    }
+
+    function addFund(code, alias) {
+      const clean = String(code).replace(/\D/g, "").slice(0, 6);
+      if (!/^\d{6}$/.test(clean)) return alert("基金代码需要是 6 位数字");
+      if (state.config.funds.some(f => f.code === clean)) return alert(`${clean} 已在关注列表`);
+      state.config.funds.push({ code: clean, alias, shares: 0, cost: 0, fee: 0 });
+      state.config.selectedFund = clean;
+      saveConfig();
+      renderFunds();
+      refreshNow();
+    }
+
+    function saveSettings() {
+      state.config.refreshSeconds = Math.max(15, Number(els.intervalInput.value) || 60);
+      state.config.alertPercent = Math.max(0, Number(els.alertInput.value) || 0);
+      state.config.soundAlert = els.soundInput.checked;
+      saveConfig();
+    }
+
+    function bindEvents() {
+      els.searchBtn.addEventListener("click", searchFunds);
+      els.themeBtns.forEach(button => {
+        button.addEventListener("click", () => {
+          els.searchInput.value = button.dataset.theme;
+          searchFunds();
+        });
+      });
+      els.searchInput.addEventListener("keydown", event => {
+        if (event.key === "Enter") searchFunds();
+      });
+      document.addEventListener("click", event => {
+        if (!event.target.closest(".search-panel")) els.searchResults.style.display = "none";
+      });
+      els.refreshBtn.addEventListener("click", refreshNow);
+      els.historyBtn.addEventListener("click", () => refreshSelectedHistory(false));
+      els.historyRange.addEventListener("change", () => refreshSelectedHistory());
+      els.indexHistoryBtn.addEventListener("click", () => refreshIndexHistory(false));
+      els.indexHistoryRange.addEventListener("change", () => refreshIndexHistory());
+      bindChartPointer(els.historyChart, els.historyTooltip, renderHistory);
+      bindChartPointer(els.indexHistoryChart, els.indexHistoryTooltip, renderIndexHistory);
+      window.addEventListener("resize", () => {
+        renderHistory();
+        renderIndexHistory();
+        renderSignals();
+      });
+      els.intervalInput.addEventListener("change", saveSettings);
+      els.alertInput.addEventListener("change", saveSettings);
+      els.soundInput.addEventListener("change", saveSettings);
+      els.fundBody.addEventListener("change", event => {
+        const target = event.target;
+        if (!target.matches("[data-edit]")) return;
+        const fund = state.config.funds.find(f => f.code === target.dataset.edit);
+        if (!fund) return;
+        fund[target.dataset.field] = Math.max(0, Number(target.value) || 0);
+        saveConfig();
+        renderFunds();
+      });
+      els.removeBtn.addEventListener("click", () => {
+        const selected = [...document.querySelectorAll("[data-check]:checked")].map(input => input.dataset.check);
+        if (!selected.length) return;
+        if (!confirm(`确认删除选中的 ${selected.length} 只基金？`)) return;
+        state.config.funds = state.config.funds.filter(f => !selected.includes(f.code));
+        if (selected.includes(state.config.selectedFund)) state.config.selectedFund = state.config.funds[0]?.code || "";
+        saveConfig();
+        renderFunds();
+        renderSignals();
+        renderHoldings();
+        renderRebalance();
+      });
+      els.addSymbolBtn.addEventListener("click", () => {
+        const symbol = els.symbolInput.value.trim().toUpperCase();
+        if (!symbol) return;
+        if (!state.config.stockWatch.some(s => secidFromSymbol(s) === secidFromSymbol(symbol))) {
+          state.config.stockWatch.push(symbol);
+          saveConfig();
+        }
+        els.symbolInput.value = "";
+        renderStocks();
+        refreshNow();
+      });
+    }
+
+    function init() {
+      els.intervalInput.value = state.config.refreshSeconds;
+      els.alertInput.value = state.config.alertPercent;
+      els.soundInput.checked = state.config.soundAlert;
+      bindEvents();
+      renderFunds();
+      renderHistory();
+      renderSignals();
+      renderHoldings();
+      renderRebalance();
+      renderIndexes();
+      renderIndexHistory();
+      renderResources();
+      renderStocks();
+      refreshNow();
+      refreshIndexHistory();
+    }
+
+    init();
+  </script>
+</body>
+</html>
