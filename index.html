@@ -2070,16 +2070,22 @@
       return `<svg class="spark ${cls(pctValue)}" viewBox="0 0 ${w} ${h}" role="img"><path d="${d}"></path><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3"></circle></svg>`;
     }
 
-    function minutesInZone(timeZone) {
+    function zonedClock(timeZone) {
       const parts = new Intl.DateTimeFormat("en-GB", {
         timeZone,
+        weekday: "short",
         hour: "2-digit",
         minute: "2-digit",
         hour12: false
       }).formatToParts(new Date());
       const hour = Number(parts.find(part => part.type === "hour")?.value || 0);
       const minute = Number(parts.find(part => part.type === "minute")?.value || 0);
-      return hour * 60 + minute;
+      const weekday = parts.find(part => part.type === "weekday")?.value || "";
+      return { minute: hour * 60 + minute, weekday };
+    }
+
+    function isWeekdayName(value) {
+      return !["Sat", "Sun"].includes(value);
     }
 
     function inRanges(minute, ranges) {
@@ -2098,22 +2104,25 @@
 
     function marketSession(market) {
       if (market === "US") {
-        const m = minutesInZone("America/New_York");
+        const clock = zonedClock("America/New_York");
+        if (!isWeekdayName(clock.weekday)) return { stage: "closed", label: "美股休市" };
+        const m = clock.minute;
         if (m >= 240 && m < 570) return { stage: "pre", label: "美股盘前" };
         if (m >= 570 && m <= 960) return { stage: "regular", label: "美股盘中" };
         if (m > 960 && m <= 1200) return { stage: "post", label: "美股盘后" };
         return { stage: "closed", label: "美股休市" };
       }
-      const m = minutesInZone("Asia/Shanghai");
-      const ranges = {
-        CN: [[570, 690], [780, 900]],
-        HK: [[570, 720], [780, 960]],
-        JP: [[480, 630], [690, 840]],
-        KR: [[480, 870]],
-        TW: [[540, 810]]
+      const configs = {
+        CN: { zone: "Asia/Shanghai", ranges: [[570, 690], [780, 900]], label: "A股盘中", closed: "A股休市" },
+        HK: { zone: "Asia/Hong_Kong", ranges: [[570, 720], [780, 960]], label: "港股盘中", closed: "港股休市" },
+        JP: { zone: "Asia/Tokyo", ranges: [[540, 690], [750, 900]], label: "日股盘中", closed: "日股休市" },
+        KR: { zone: "Asia/Seoul", ranges: [[540, 930]], label: "韩股盘中", closed: "韩股休市" },
+        TW: { zone: "Asia/Taipei", ranges: [[540, 810]], label: "台股盘中", closed: "台股休市" }
       };
-      const labels = { CN: "A股盘中", HK: "港股盘中", JP: "日股盘中", KR: "韩股盘中", TW: "台股盘中" };
-      return inRanges(m, ranges[market] || ranges.CN) ? { stage: "regular", label: labels[market] || "盘中" } : { stage: "closed", label: `${labels[market] || "市场"}休市` };
+      const config = configs[market] || configs.CN;
+      const clock = zonedClock(config.zone);
+      if (!isWeekdayName(clock.weekday)) return { stage: "closed", label: config.closed };
+      return inRanges(clock.minute, config.ranges) ? { stage: "regular", label: config.label } : { stage: "closed", label: config.closed };
     }
 
     function updateFundIntraday(fund, quote) {
@@ -2125,10 +2134,10 @@
       existing.market = market;
       existing.session = session.stage;
       existing.label = session.label;
+      existing.latest = {};
       if (session.stage === "pre") existing.latest.pre = change;
       if (session.stage === "regular") existing.latest.regular = change;
       if (session.stage === "post") existing.latest.post = change;
-      if (session.stage === "closed" && !Number.isFinite(existing.latest.post)) existing.latest.post = change;
       if (session.stage !== "closed") {
         const minuteKey = Math.floor(Date.now() / 60000);
         const last = existing.rows.at(-1);
@@ -2149,7 +2158,8 @@
       const data = state.fundIntraday.get(code);
       const rows = data?.rows || [];
       if (rows.length < 2) {
-        const value = Number.isFinite(fallbackPct) ? pct(fallbackPct) : (data?.label || "等待交易");
+        const active = data && data.session !== "closed";
+        const value = active && Number.isFinite(fallbackPct) ? pct(fallbackPct) : (data?.label || "等待交易");
         return `<svg class="fund-trend" viewBox="0 0 180 48" role="img"><path class="grid" d="M8 24H172"></path><text x="52" y="29">${escapeHtml(value)}</text></svg>`;
       }
       const values = rows.map(row => row.value).filter(Number.isFinite);
