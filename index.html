@@ -505,6 +505,8 @@
               <option value="90" selected>近3个月</option>
               <option value="180">近6个月</option>
               <option value="365">近1年</option>
+              <option value="1095">近3年</option>
+              <option value="0">成立以来</option>
             </select>
             <button class="mini" id="historyBtn">刷新历史</button>
           </div>
@@ -1507,29 +1509,47 @@
     }
 
     async function fetchHistory(code, days) {
+      const targetDays = Number(days) || 0;
+      const pageSize = 20;
+      const maxPages = targetDays > 0 ? Math.ceil(targetDays / pageSize) + 3 : 260;
+      const rows = [];
+      let total = 0;
       try {
-        const pageSize = Math.max(30, Math.min(370, Number(days) || 90));
-        delete window.apidata;
-        const f10 = await scriptVar(`https://fundf10.eastmoney.com/F10DataApi.aspx?type=lsjz&code=${code}&page=1&per=${pageSize}&sdate=&edate=&rt=${Date.now()}`, "apidata");
-        const rows = parseHistoryHtml(f10?.content || "");
-        if (rows.length) return { code, rows, total: f10?.records || rows.length, error: "" };
-      } catch {}
-
-      try {
-        const pageSize = Math.max(30, Math.min(370, Number(days) || 90));
-        const data = await jsonp(`https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=${pageSize}&startDate=&endDate=`, "callback", 12000);
-        const rows = (data?.Data?.LSJZList || []).map(row => ({
-          date: row.FSRQ || "",
-          nav: toNumber(row.DWJZ),
-          totalNav: toNumber(row.LJJZ),
-          changePct: Number(row.JZZZL),
-          buyStatus: row.SGZT || "",
-          sellStatus: row.SHZT || ""
-        })).filter(row => row.date && row.nav);
-        return { code, rows, total: data?.TotalCount || rows.length, error: rows.length ? "" : "暂无历史净值" };
+        for (let page = 1; page <= maxPages; page += 1) {
+          delete window.apidata;
+          const f10 = await scriptVar(`https://fundf10.eastmoney.com/F10DataApi.aspx?type=lsjz&code=${code}&page=${page}&per=${pageSize}&sdate=&edate=&rt=${Date.now()}`, "apidata", 15000);
+          const pageRows = parseHistoryHtml(f10?.content || "");
+          total = f10?.records || total || pageRows.length;
+          rows.push(...pageRows);
+          if (!pageRows.length) break;
+          if (targetDays > 0 && rows.length >= targetDays) break;
+          if (total && rows.length >= total) break;
+        }
+        const unique = [];
+        const seen = new Set();
+        for (const row of rows) {
+          if (seen.has(row.date)) continue;
+          seen.add(row.date);
+          unique.push(row);
+        }
+        const sliced = targetDays > 0 ? unique.slice(0, targetDays) : unique;
+        if (sliced.length) return { code, rows: sliced, total: total || sliced.length, error: "" };
       } catch (error) {
+        try {
+          const data = await jsonp(`https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=${targetDays || 200}&startDate=&endDate=`, "callback", 12000);
+          const fallbackRows = (data?.Data?.LSJZList || []).map(row => ({
+            date: row.FSRQ || "",
+            nav: toNumber(row.DWJZ),
+            totalNav: toNumber(row.LJJZ),
+            changePct: Number(row.JZZZL),
+            buyStatus: row.SGZT || "",
+            sellStatus: row.SHZT || ""
+          })).filter(row => row.date && row.nav);
+          if (fallbackRows.length) return { code, rows: fallbackRows, total: data?.TotalCount || fallbackRows.length, error: "" };
+        } catch {}
         return { code, rows: [], total: 0, error: error.message };
       }
+      return { code, rows: [], total: 0, error: "暂无历史净值" };
     }
 
     function parseHistoryHtml(html) {
@@ -1676,6 +1696,20 @@
     function parsePercent(value) {
       const n = Number(String(value || "").replace(/[% ,]/g, ""));
       return Number.isFinite(n) ? n : NaN;
+    }
+
+    function selectedHistoryDays() {
+      return Number(els.historyRange.value);
+    }
+
+    function historyRangeLabel(days) {
+      if (!days) return "成立以来";
+      if (days === 30) return "近1个月";
+      if (days === 90) return "近3个月";
+      if (days === 180) return "近6个月";
+      if (days === 365) return "近1年";
+      if (days === 1095) return "近3年";
+      return `近 ${days} 天`;
     }
 
     function money(value) {
@@ -1879,7 +1913,7 @@
 
     function renderHistory() {
       const code = state.config.selectedFund;
-      const days = Number(els.historyRange.value) || 90;
+      const days = selectedHistoryDays();
       const key = `${code}:${days}`;
       const data = state.history.get(key);
       els.historyBody.innerHTML = "";
@@ -1897,7 +1931,7 @@
       const maxNav = Math.max(...rowsAsc.map(row => row.nav));
       const minNav = Math.min(...rowsAsc.map(row => row.nav));
       els.historySummary.innerHTML = `
-        <span>${code} 近 ${days} 天</span>
+        <span>${code} ${historyRangeLabel(days)}，${data.rows.length} 条</span>
         <span>最新净值 ${last ? money(last.nav) : "--"}</span>
         <span>区间收益 <b class="${cls(rangeReturn)}">${Number.isFinite(rangeReturn) ? pct(rangeReturn) : "--"}</b></span>
         <span>最高 ${money(maxNav)}</span>
@@ -1929,7 +1963,7 @@
       const code = state.config.selectedFund;
       const fund = state.config.funds.find(item => item.code === code);
       const quote = state.quotes.get(code) || {};
-      const days = Number(els.historyRange.value) || 90;
+      const days = selectedHistoryDays();
       const history = state.history.get(`${code}:${days}`);
       const holding = state.holdings.get(code);
       const fundStock = state.stocks.get(secidFromFundCode(code));
@@ -2385,13 +2419,13 @@
     async function refreshSelectedHistory(useCache = true) {
       const code = state.config.selectedFund;
       if (!code) return;
-      const days = Number(els.historyRange.value) || 90;
+      const days = selectedHistoryDays();
       const key = `${code}:${days}`;
       if (useCache && state.history.has(key)) {
         renderHistory();
         return;
       }
-      els.historySummary.textContent = "正在加载历史净值...";
+      els.historySummary.textContent = `正在加载${historyRangeLabel(days)}历史净值...`;
       const data = await fetchHistory(code, days);
       state.history.set(key, data);
       renderHistory();
