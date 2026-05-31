@@ -2127,9 +2127,13 @@
     }
 
     function inferFundMarket(fund, quote = {}) {
+      const codeMarket = {
+        "002891": "US"
+      };
+      if (codeMarket[fund.code]) return codeMarket[fund.code];
       const text = `${fund.code || ""} ${fund.alias || ""} ${quote.name || ""}`.toUpperCase();
-      if (/纳斯达克|NASDAQ|纳指|标普|S&P|道琼|美股|美元|全球精选|海外|QDII/.test(text)) return "US";
-      if (/恒生|港股|香港|H股|中概|互联|互联网/.test(text)) return "HK";
+      if (/纳斯达克|NASDAQ|纳指|标普|S&P|道琼|美股|美元|全球精选|海外|QDII|移动互联|全球科技|智能科技|高端制造/.test(text)) return "US";
+      if (/恒生|港股|香港|H股|中概/.test(text)) return "HK";
       if (/日经|日本/.test(text)) return "JP";
       if (/韩国|韩股/.test(text)) return "KR";
       if (/台湾|台股/.test(text)) return "TW";
@@ -2169,6 +2173,12 @@
         hour: Number(match[4]),
         minute: Number(match[5])
       };
+    }
+
+    function compactDate(value) {
+      const match = String(value || "").match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if (!match) return 0;
+      return Number(`${match[1]}${String(match[2]).padStart(2, "0")}${String(match[3]).padStart(2, "0")}`);
     }
 
     function classifyFundEstimateStage(fund, quote, session = marketSession(inferFundMarket(fund, quote))) {
@@ -2305,7 +2315,13 @@
         const dataStage = estimateDataStage(fund, quote);
         const preChange = calcFundPreSignal(fund, quote);
         const regularChange = stage === "regular" && dataStage !== "post" ? currentEstimateChange : NaN;
-        const postChange = stage === "post" || dataStage === "post" ? currentEstimateChange : NaN;
+        const officialChange = latestHistory && compactDate(latestHistory.date) >= compactDate(quote.estimateTime)
+          ? latestHistory.changePct
+          : NaN;
+        const postChange = Number.isFinite(officialChange)
+          ? officialChange
+          : (stage === "post" || dataStage === "post" ? currentEstimateChange : NaN);
+        const postLabel = Number.isFinite(officialChange) ? "实际" : "";
 
         const selected = state.config.selectedFund === fund.code;
         const row = document.createElement("tr");
@@ -2317,7 +2333,7 @@
           <td>${nav ? money(nav) : "--"}</td>
           <td class="${liveCls(preChange)}">${liveText(Number.isFinite(preChange) ? pct(preChange) : "--")}</td>
           <td class="${liveCls(regularChange)}">${liveText(Number.isFinite(regularChange) ? pct(regularChange) : "--")}</td>
-          <td class="${liveCls(postChange)}">${liveText(Number.isFinite(postChange) ? pct(postChange) : "--")}</td>
+          <td class="${liveCls(postChange)}">${liveText(Number.isFinite(postChange) ? `${pct(postChange)}${postLabel ? ` <span class="muted">${postLabel}</span>` : ""}` : "--")}</td>
           <td>${renderFundTrend(fund.code, currentEstimateChange)}</td>
           <td>${escapeHtml(quote.estimateTime || "")}</td>
           <td>${quote.nav ? money(quote.nav) : "--"} <span class="muted">${escapeHtml(quote.navDate || "")}</span></td>
