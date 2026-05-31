@@ -369,6 +369,7 @@
       .chart-wrap { height: 220px; }
       th, td { padding: 8px; }
     }
+    .fund-wrap { max-height: 640px; }
   </style>
 </head>
 <body>
@@ -464,9 +465,10 @@
           <div class="tools">
             <label>声音提醒 <input id="soundInput" type="checkbox"></label>
             <button class="mini" id="removeBtn">删除选中</button>
+            <button class="mini" id="clearFundsBtn">清空全部</button>
           </div>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap fund-wrap">
           <table>
             <thead>
               <tr>
@@ -815,6 +817,7 @@
       alertInput: document.querySelector("#alertInput"),
       soundInput: document.querySelector("#soundInput"),
       removeBtn: document.querySelector("#removeBtn"),
+      clearFundsBtn: document.querySelector("#clearFundsBtn"),
       ocrFile: document.querySelector("#ocrFile"),
       ocrPreview: document.querySelector("#ocrPreview"),
       ocrText: document.querySelector("#ocrText"),
@@ -931,7 +934,7 @@
       const text = String(value || "").trim();
       if (text.length < 4 || text.length > 36) return false;
       if (/支付宝|蚂蚁|财付通|理财通|天天基金|浏览器|安全|保障|省钱|外资|确认|买入|卖出|截图|识别/.test(text)) return false;
-      return /基金|混合|股票|债券|指数|ETF|联接|QDII|LOF|纳斯达克|标普|恒生|招商|华夏|易方达|广发|天弘|南方|嘉实|富国|华安/.test(text);
+      return /基金|混合|股票|债券|指数|ETF|联接|QDII|LOF|纳斯达克|标普|恒生|招商|华夏|易方达|广发|天弘|南方|嘉实|富国|华安|长城|国泰|国富|浦银安盛|财通/.test(text);
     }
 
     function cleanOcrFundName(value) {
@@ -940,7 +943,7 @@
         .replace(/[|｜]/g, "")
         .replace(/\.{2,}|…+/g, "")
         .replace(/[（(]QDII.*$/i, "(QDII)")
-        .replace(/^(名称|基金名称|我的持有|全部|偏股|偏债|指数|黄金)/, "")
+        .replace(/^(名称|基金名称|我的持有|全部|偏股|偏债|指数|黄金|定投)/, "")
         .replace(/灵$/, "")
         .trim();
     }
@@ -950,6 +953,12 @@
       if (!usefulFundName(text)) return false;
       if (/投资锦囊|市场解读|买入|卖出|更新|昨日收益|持有收益|金额|收益率|全部|排序|更多产品|去市场|偏股|偏债|黄金/.test(text)) return false;
       return true;
+    }
+
+    function isContinuationFundName(line) {
+      const text = cleanOcrFundName(splitNameAndNumbers(line).nameText);
+      if (!text || /投资锦囊|市场解读|定投|周末|更多产品|基金销售/.test(text)) return false;
+      return /混合|股票|债券|指数|货币|QDII|QDI|ETF|LOF|精选|级|造|联|^合[AC]$/.test(text);
     }
 
     function ocrNumbers(line) {
@@ -974,22 +983,35 @@
 
     function splitNameAndNumbers(line) {
       const text = String(line || "").trim();
-      const match = text.match(/[-+]?\d{1,3}(?:[,，]\d{3})*(?:\.\d+)?|[-+]?\d+\.\d+/);
+      const compact = text.replace(/([,，])\s+(\d)/g, "$1$2").replace(/(\d)\s+([.．])\s*(\d)/g, "$1.$3");
+      const matches = [...compact.matchAll(/[-+]?\d{1,3}(?:[,，]\d{3})+(?:\.\d+)?|[-+]?\d+\.\d+/g)];
+      const match = matches.find(item => {
+        if (item.index === 0) return true;
+        const prev = compact[item.index - 1] || "";
+        return !/[A-Za-z0-9]/.test(prev);
+      });
       if (!match) return { nameText: text, numberText: "" };
       return {
-        nameText: text.slice(0, match.index).trim(),
-        numberText: text.slice(match.index).trim()
+        nameText: compact.slice(0, match.index).trim(),
+        numberText: compact.slice(match.index).trim()
       };
     }
 
     function parseHoldingListRows(lines, platform, date) {
       const rows = [];
-      for (let i = 0; i < lines.length; i += 1) {
-        const split = splitNameAndNumbers(lines[i]);
-        let name = cleanOcrFundName(split.nameText || lines[i]);
+      const headerIndex = lines.findIndex(line => {
+        const compact = String(line || "").replace(/\s+/g, "");
+        return /名称/.test(compact) && /金额|收益/.test(compact);
+      });
+      const sourceLines = headerIndex >= 0 ? lines.slice(headerIndex + 1) : lines;
+      for (let i = 0; i < sourceLines.length; i += 1) {
+        const split = splitNameAndNumbers(sourceLines[i]);
+        let name = cleanOcrFundName(split.nameText || sourceLines[i]);
         let numberText = split.numberText;
-        if (!isLikelyFundNameLine(name) && i + 1 < lines.length) {
-          const joined = cleanOcrFundName(`${lines[i]}${lines[i + 1]}`);
+        if (/^\s*[-+]?\d/.test(sourceLines[i])) continue;
+        if (!name && /定投|市场解读|周末|更多产品|基金销售/.test(sourceLines[i])) continue;
+        if (!isLikelyFundNameLine(name) && i + 1 < sourceLines.length) {
+          const joined = cleanOcrFundName(`${sourceLines[i]}${sourceLines[i + 1]}`);
           if (isLikelyFundNameLine(joined)) {
             name = joined;
             numberText = "";
@@ -997,7 +1019,13 @@
           }
         }
         if (!isLikelyFundNameLine(name)) continue;
-        const segment = `${numberText} ${lines.slice(i + 1, i + 5).join(" ")}`;
+        if (i + 1 < sourceLines.length && isContinuationFundName(sourceLines[i + 1])) {
+          const next = splitNameAndNumbers(sourceLines[i + 1]);
+          name = cleanOcrFundName(`${name}${next.nameText}`);
+          numberText = `${numberText} ${next.numberText}`;
+          i += 1;
+        }
+        const segment = `${numberText} ${sourceLines.slice(i + 1, i + 4).join(" ")}`;
         const nums = pickHoldingNumbers(segment);
         if (!nums.amount && !nums.profit && !nums.profitRate) continue;
         rows.push({
@@ -1112,6 +1140,7 @@
         [/长城收益宝货币.*/, "长城收益宝货币"],
         [/易方达全球成长精选.*/, "易方达全球成长精选混合"],
         [/浦银安盛全球智能科技.*/, "浦银安盛全球智能科技股票"],
+        [/浦银安盛全球智能.*/, "浦银安盛全球智能科技"],
         [/国富亚洲机会.*/, "国富亚洲机会股票"],
         [/财通成长优选.*/, "财通成长优选混合"]
       ];
@@ -1126,20 +1155,83 @@
       return [...new Set(keywords.filter(Boolean))];
     }
 
+    function classPreference(name) {
+      const text = cleanOcrFundName(name);
+      if (/C$|C类|合C|QDIDC|QDII.*C|人民币C/.test(text)) return "C";
+      if (/A$|A类|合A|QDIDA|QDINA|QDII.*A|人民币A/.test(text)) return "A";
+      return "A";
+    }
+
+    function fundHintForOcrName(name) {
+      const text = cleanOcrFundName(name);
+      const pref = classPreference(text);
+      const choose = (a, c) => pref === "C" && c ? c : a;
+      const hints = [
+        [/华夏移动互联/, { code: "002891", name: "华夏移动互联混合人民币" }],
+        [/长城全球新能源/, choose(
+          { code: "501226", name: "长城全球新能源车股票发起式(QDII)A" },
+          { code: "018036", name: "长城全球新能源车股票发起式(QDII)C" }
+        )],
+        [/天弘全球高端制造/, choose(
+          { code: "016664", name: "天弘全球高端制造混合(QDII)A" },
+          { code: "016665", name: "天弘全球高端制造混合(QDII)C" }
+        )],
+        [/国泰纳斯达克100/, { code: "160213", name: "国泰纳斯达克100指数" }],
+        [/国富全球科技互联/, choose(
+          { code: "006373", name: "国富全球科技互联混合(QDII)人民币A" },
+          { code: "021842", name: "国富全球科技互联混合(QDII)人民币C" }
+        )],
+        [/嘉实全球产业升级/, choose(
+          { code: "017730", name: "嘉实全球产业升级股票发起式(QDII)A" },
+          { code: "017731", name: "嘉实全球产业升级股票发起式(QDII)C" }
+        )],
+        [/南方纳斯达克100/, choose(
+          { code: "016452", name: "南方纳斯达克100指数发起(QDII)A" },
+          { code: "016453", name: "南方纳斯达克100指数发起(QDII)C" }
+        )],
+        [/长城收益宝货币/, { code: "004972", name: "长城收益宝货币A" }],
+        [/易方达全球成长精选/, choose(
+          { code: "012920", name: "易方达全球成长精选混合(QDII)人民币A" },
+          { code: "012922", name: "易方达全球成长精选混合(QDII)人民币C" }
+        )],
+        [/浦银安盛全球智能科技/, choose(
+          { code: "006555", name: "浦银安盛全球智能科技(QDII)A" },
+          { code: "014002", name: "浦银安盛全球智能科技(QDII)C" }
+        )],
+        [/国富亚洲机会/, choose(
+          { code: "457001", name: "国富亚洲机会股票(QDII)A" },
+          { code: "021662", name: "国富亚洲机会股票(QDII)C" }
+        )],
+        [/财通成长优选/, choose(
+          { code: "001480", name: "财通成长优选混合A" },
+          { code: "021528", name: "财通成长优选混合C" }
+        )]
+      ];
+      const hit = hints.find(([pattern]) => pattern.test(text));
+      return hit?.[1] || null;
+    }
+
     function scoreFundMatch(rowName, fund) {
       const query = cleanOcrFundName(rowName);
       const name = cleanOcrFundName(fund.NAME || fund.Name || "");
       let score = 0;
+      const queryCore = query.replace(/(股票|混合|债券|指数|货币|基金|发起式|QDII|ETF|LOF|人民币|美元|现汇|现钞|A|C)+/ig, "");
+      const nameCore = name.replace(/(股票|混合|债券|指数|货币|基金|发起式|QDII|ETF|LOF|人民币|美元|现汇|现钞|A|C)+/ig, "");
+      if (queryCore.length >= 4 && nameCore.includes(queryCore)) score += queryCore.length + 12;
       for (const token of query.match(/[\u4e00-\u9fa5]{2,}|[A-Za-z0-9]+/g) || []) {
         if (name.includes(token)) score += token.length;
       }
       if (/QDII/i.test(query) && /QDII/i.test(name)) score += 8;
-      if (/C$|C类|合C/.test(query) && /C$|C类|合C/.test(name)) score += 4;
-      if (!/C$|C类|合C/.test(query) && /A$|A类|合A|人民币$|人民币A/.test(name)) score += 2;
+      const queryWantsC = /C$|C类|合C/.test(query);
+      if (queryWantsC && /C$|C类|合C/.test(name)) score += 8;
+      if (!queryWantsC && /A$|A类|合A|人民币$|人民币A/.test(name)) score += 8;
+      if (!queryWantsC && /C$|C类|合C/.test(name)) score -= 4;
       return score;
     }
 
     async function findFundByOcrName(rowName) {
+      const hint = fundHintForOcrName(rowName);
+      if (hint) return { CODE: hint.code, NAME: hint.name, CATEGORY: 700 };
       let best = null;
       let bestScore = 0;
       for (const keyword of ocrSearchKeywords(rowName)) {
@@ -2489,6 +2581,18 @@
         if (selected.includes(state.config.selectedFund)) state.config.selectedFund = state.config.funds[0]?.code || "";
         saveConfig();
         renderFunds();
+        renderSignals();
+        renderHoldings();
+        renderRebalance();
+      });
+      els.clearFundsBtn.addEventListener("click", () => {
+        if (!state.config.funds.length) return;
+        if (!confirm(`确认清空全部 ${state.config.funds.length} 只关注基金？此操作只清空本浏览器保存的关注列表。`)) return;
+        state.config.funds = [];
+        state.config.selectedFund = "";
+        saveConfig();
+        renderFunds();
+        renderHistory();
         renderSignals();
         renderHoldings();
         renderRebalance();
