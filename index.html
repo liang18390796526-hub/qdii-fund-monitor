@@ -461,6 +461,33 @@
     }
     .fund-wrap { max-height: 640px; }
     .fund-wrap table { min-width: 1580px; }
+    .trade-sync {
+      border-top: 1px solid var(--line);
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+    .trade-form {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(110px, 1fr));
+      gap: 8px;
+      align-items: end;
+    }
+    .trade-form label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: left;
+    }
+    .trade-form input, .trade-form select { width: 100%; }
+    .trade-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .trade-log { max-height: 220px; }
+    .trade-log table { min-width: 980px; }
   </style>
 </head>
 <body>
@@ -587,6 +614,73 @@
             </thead>
             <tbody id="fundBody"></tbody>
           </table>
+        </div>
+        <div class="trade-sync">
+          <div class="section-head" style="padding:0;border:0;">
+            <h2>交易同步</h2>
+            <div class="hint" id="tradeSyncHint">选择一只基金后，可同步加仓、减仓、定投、转换</div>
+          </div>
+          <div class="trade-form">
+            <label>交易类型
+              <select id="tradeType">
+                <option value="buy">同步加仓</option>
+                <option value="sell">同步减仓</option>
+                <option value="dca">同步定投</option>
+                <option value="convert">同步转换</option>
+              </select>
+            </label>
+            <label>金额(元)
+              <input id="tradeAmount" type="number" min="0" step="0.01" placeholder="买入/转换金额">
+            </label>
+            <label>份额
+              <input id="tradeShares" type="number" min="0" step="0.01" placeholder="卖出份额可填">
+            </label>
+            <label>买入费率(%)
+              <input id="tradeBuyRate" type="number" min="0" step="0.01" value="0.15">
+            </label>
+            <label>卖出费率(%)
+              <input id="tradeSellRate" type="number" min="0" step="0.01" value="0">
+            </label>
+            <label>转换到代码
+              <input id="tradeTargetCode" placeholder="转换时填6位代码">
+            </label>
+            <label>交易日期
+              <input id="tradeDate" type="date">
+            </label>
+            <label>交易时间
+              <input id="tradeTime" type="time" value="14:55">
+            </label>
+            <label>参考净值
+              <input id="tradeNav" type="number" min="0" step="0.0001" placeholder="默认用估值/净值">
+            </label>
+            <label>备注
+              <input id="tradeNote" placeholder="平台/用途/说明">
+            </label>
+          </div>
+          <div class="trade-actions">
+            <button class="mini primary" id="applyTradeBtn">同步到持仓</button>
+            <button class="mini" id="clearTradeBtn">清空交易记录</button>
+          </div>
+          <div class="table-wrap trade-log">
+            <table>
+              <thead>
+                <tr>
+                  <th>类型</th>
+                  <th>基金</th>
+                  <th>金额</th>
+                  <th>份额</th>
+                  <th>手续费</th>
+                  <th>费率</th>
+                  <th>下单时间</th>
+                  <th>确认日</th>
+                  <th>交易日判断</th>
+                  <th>备注</th>
+                </tr>
+              </thead>
+              <tbody id="tradeBody"></tbody>
+            </table>
+          </div>
+          <div class="notice">确认日按工作日和 15:00 前后估算；遇法定节假日、QDII 境外休市或平台特殊规则时，需要以平台最终确认为准。</div>
         </div>
       </section>
 
@@ -956,6 +1050,20 @@
       realtimeFundChart: document.querySelector("#realtimeFundChart"),
       realtimeFundTooltip: document.querySelector("#realtimeFundTooltip"),
       realtimeFundSummary: document.querySelector("#realtimeFundSummary"),
+      tradeSyncHint: document.querySelector("#tradeSyncHint"),
+      tradeType: document.querySelector("#tradeType"),
+      tradeAmount: document.querySelector("#tradeAmount"),
+      tradeShares: document.querySelector("#tradeShares"),
+      tradeBuyRate: document.querySelector("#tradeBuyRate"),
+      tradeSellRate: document.querySelector("#tradeSellRate"),
+      tradeTargetCode: document.querySelector("#tradeTargetCode"),
+      tradeDate: document.querySelector("#tradeDate"),
+      tradeTime: document.querySelector("#tradeTime"),
+      tradeNav: document.querySelector("#tradeNav"),
+      tradeNote: document.querySelector("#tradeNote"),
+      applyTradeBtn: document.querySelector("#applyTradeBtn"),
+      clearTradeBtn: document.querySelector("#clearTradeBtn"),
+      tradeBody: document.querySelector("#tradeBody"),
       historyRange: document.querySelector("#historyRange"),
       historyBtn: document.querySelector("#historyBtn"),
       historyChart: document.querySelector("#historyChart"),
@@ -994,6 +1102,7 @@
           config.refreshSeconds = 1;
           config.realtimeRefreshV2 = true;
         }
+        config.funds = config.funds.map(fund => ({ transactions: [], ...fund }));
         return config;
       } catch {
         return structuredClone(DEFAULT_CONFIG);
@@ -1002,6 +1111,56 @@
 
     function saveConfig() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state.config));
+    }
+
+    function todayInputValue() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    }
+
+    function isBusinessDay(date) {
+      const day = date.getDay();
+      return day >= 1 && day <= 5;
+    }
+
+    function nextBusinessDay(date) {
+      const next = new Date(date);
+      do {
+        next.setDate(next.getDate() + 1);
+      } while (!isBusinessDay(next));
+      return next;
+    }
+
+    function dateString(date) {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    }
+
+    function calcConfirmInfo(dateValue, timeValue) {
+      const [y, m, d] = String(dateValue || todayInputValue()).split("-").map(Number);
+      const [hh, mm] = String(timeValue || "14:55").split(":").map(Number);
+      const orderDate = new Date(y, (m || 1) - 1, d || 1);
+      const afterCutoff = (hh || 0) * 60 + (mm || 0) >= 15 * 60;
+      const tradeDay = isBusinessDay(orderDate);
+      let base = new Date(orderDate);
+      if (!tradeDay || afterCutoff) base = nextBusinessDay(base);
+      return {
+        orderDate: dateString(orderDate),
+        orderTime: `${String(hh || 0).padStart(2, "0")}:${String(mm || 0).padStart(2, "0")}`,
+        confirmDate: dateString(base),
+        isTradeDay: tradeDay,
+        afterCutoff,
+        note: tradeDay
+          ? `${afterCutoff ? "15点后按下一交易日" : "15点前按当日"}`
+          : "非交易日按下一交易日"
+      };
+    }
+
+    function tradeTypeName(type) {
+      return ({ buy: "同步加仓", sell: "同步减仓", dca: "同步定投", convert: "同步转换" })[type] || "交易";
+    }
+
+    function fundNavForTrade(fund, quote) {
+      return Number(els.tradeNav.value) || Number(quote?.estimate) || Number(quote?.nav) || 0;
     }
 
     function parseOcrNumber(value) {
@@ -2089,6 +2248,149 @@
       els.totalProfit.className = `value ${cls(totalProfit)}`;
       els.totalProfitRate.textContent = Number.isFinite(totalRate) ? pct(totalRate) : "--";
       els.totalProfitRate.className = `value ${cls(totalRate)}`;
+      renderTradeSync();
+    }
+
+    function renderTradeSync() {
+      const fund = state.config.funds.find(item => item.code === state.config.selectedFund);
+      const quote = state.quotes.get(state.config.selectedFund) || {};
+      els.tradeSyncHint.textContent = fund
+        ? `${fund.code} ${quote.name || fund.alias || ""}，当前份额 ${Number(fund.shares || 0).toFixed(2)}，成本 ${money(Number(fund.cost || 0))}，累计手续费 ${money(Number(fund.fee || 0))}`
+        : "选择一只基金后，可同步加仓、减仓、定投、转换";
+      els.tradeBody.innerHTML = "";
+      if (!fund) {
+        els.tradeBody.innerHTML = `<tr><td colspan="10" class="muted">暂无选中基金</td></tr>`;
+        return;
+      }
+      const rows = [...(fund.transactions || [])].reverse();
+      if (!rows.length) {
+        els.tradeBody.innerHTML = `<tr><td colspan="10" class="muted">暂无交易同步记录</td></tr>`;
+        return;
+      }
+      for (const tx of rows.slice(0, 30)) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(tradeTypeName(tx.type))}</td>
+          <td class="code">${escapeHtml(tx.code || fund.code)}${tx.targetCode ? ` -> ${escapeHtml(tx.targetCode)}` : ""}</td>
+          <td>${money(tx.amount || 0)}</td>
+          <td>${Number(tx.shares || 0).toFixed(2)}</td>
+          <td>${money(tx.fee || 0)}</td>
+          <td>${escapeHtml(tx.rateText || "--")}</td>
+          <td>${escapeHtml(`${tx.orderDate || ""} ${tx.orderTime || ""}`)}</td>
+          <td>${escapeHtml(tx.confirmDate || "")}</td>
+          <td>${escapeHtml(tx.tradeNote || "")}</td>
+          <td>${escapeHtml(tx.note || "")}</td>
+        `;
+        els.tradeBody.appendChild(tr);
+      }
+    }
+
+    function applyTradeSync() {
+      const fund = state.config.funds.find(item => item.code === state.config.selectedFund);
+      if (!fund) return alert("请先选择一只关注基金");
+      const type = els.tradeType.value;
+      const quote = state.quotes.get(fund.code) || {};
+      const nav = fundNavForTrade(fund, quote);
+      if (!nav) return alert("缺少参考净值，请手动填写参考净值后再同步");
+
+      const amount = Math.max(0, Number(els.tradeAmount.value) || 0);
+      const inputShares = Math.max(0, Number(els.tradeShares.value) || 0);
+      const buyRate = Math.max(0, Number(els.tradeBuyRate.value) || 0) / 100;
+      const sellRate = Math.max(0, Number(els.tradeSellRate.value) || 0) / 100;
+      const confirm = calcConfirmInfo(els.tradeDate.value, els.tradeTime.value);
+      const currentShares = Number(fund.shares) || 0;
+      const currentCost = Number(fund.cost) || 0;
+      const currentFee = Number(fund.fee) || 0;
+      let shares = inputShares;
+      let fee = 0;
+      let targetCode = "";
+      let note = els.tradeNote.value.trim();
+
+      if (type === "buy" || type === "dca") {
+        if (!amount) return alert("同步加仓/定投需要填写金额");
+        fee = amount * buyRate;
+        const netAmount = Math.max(0, amount - fee);
+        shares = netAmount / nav;
+        fund.shares = currentShares + shares;
+        fund.cost = currentCost + netAmount;
+        fund.fee = currentFee + fee;
+      } else if (type === "sell") {
+        if (!shares && amount) shares = Math.min(currentShares, amount / nav);
+        if (!shares) return alert("同步减仓需要填写份额，或填写金额自动估算份额");
+        shares = Math.min(currentShares, shares);
+        const gross = shares * nav;
+        fee = gross * sellRate;
+        const costOut = currentShares ? currentCost * (shares / currentShares) : 0;
+        fund.shares = Math.max(0, currentShares - shares);
+        fund.cost = Math.max(0, currentCost - costOut);
+        fund.fee = currentFee + fee;
+      } else if (type === "convert") {
+        targetCode = String(els.tradeTargetCode.value || "").replace(/\D/g, "").slice(0, 6);
+        if (!/^\d{6}$/.test(targetCode)) return alert("同步转换需要填写转换到的 6 位基金代码");
+        if (!shares && amount) shares = Math.min(currentShares, amount / nav);
+        if (!shares) return alert("同步转换需要填写转换金额或转换份额");
+        shares = Math.min(currentShares, shares);
+        const gross = shares * nav;
+        const sellFee = gross * sellRate;
+        const buyFee = Math.max(0, gross - sellFee) * buyRate;
+        fee = sellFee + buyFee;
+        const netAmount = Math.max(0, gross - sellFee - buyFee);
+        const costOut = currentShares ? currentCost * (shares / currentShares) : 0;
+        fund.shares = Math.max(0, currentShares - shares);
+        fund.cost = Math.max(0, currentCost - costOut);
+        fund.fee = currentFee + fee;
+
+        let target = state.config.funds.find(item => item.code === targetCode);
+        if (!target) {
+          target = { code: targetCode, alias: `转换转入 ${targetCode}`, shares: 0, cost: 0, fee: 0, transactions: [] };
+          state.config.funds.push(target);
+        }
+        const targetQuote = state.quotes.get(targetCode) || {};
+        const targetNav = Number(targetQuote.estimate) || Number(targetQuote.nav) || nav;
+        const targetShares = targetNav ? netAmount / targetNav : 0;
+        target.shares = (Number(target.shares) || 0) + targetShares;
+        target.cost = (Number(target.cost) || 0) + netAmount;
+        target.fee = (Number(target.fee) || 0) + buyFee;
+        target.transactions = target.transactions || [];
+        target.transactions.push({
+          id: Date.now() + 1,
+          type: "convert",
+          code: fund.code,
+          targetCode,
+          amount: gross,
+          shares: targetShares,
+          fee: buyFee,
+          rateText: `转入买 ${pct(buyRate * 100)}`,
+          orderDate: confirm.orderDate,
+          orderTime: confirm.orderTime,
+          confirmDate: confirm.confirmDate,
+          tradeNote: confirm.note,
+          note: `由 ${fund.code} 转入；${note}`
+        });
+      }
+
+      fund.transactions = fund.transactions || [];
+      fund.transactions.push({
+        id: Date.now(),
+        type,
+        code: fund.code,
+        targetCode,
+        amount: type === "sell" || type === "convert" ? shares * nav : amount,
+        shares,
+        fee,
+        rateText: type === "sell" ? `卖 ${pct(sellRate * 100)}` : type === "convert" ? `卖 ${pct(sellRate * 100)} / 买 ${pct(buyRate * 100)}` : `买 ${pct(buyRate * 100)}`,
+        orderDate: confirm.orderDate,
+        orderTime: confirm.orderTime,
+        confirmDate: confirm.confirmDate,
+        tradeNote: confirm.note,
+        note
+      });
+      saveConfig();
+      renderFunds();
+      renderRealtimeFundBoard();
+      els.tradeAmount.value = "";
+      els.tradeShares.value = "";
+      els.tradeNote.value = "";
     }
 
     function renderRealtimeFundBoard() {
@@ -3046,6 +3348,20 @@
       els.intervalInput.addEventListener("change", saveSettings);
       els.alertInput.addEventListener("change", saveSettings);
       els.soundInput.addEventListener("change", saveSettings);
+      els.applyTradeBtn.addEventListener("click", applyTradeSync);
+      els.clearTradeBtn.addEventListener("click", () => {
+        const fund = state.config.funds.find(item => item.code === state.config.selectedFund);
+        if (!fund) return;
+        if (!confirm(`确认清空 ${fund.code} 的交易同步记录？不会回滚已同步的份额和成本。`)) return;
+        fund.transactions = [];
+        saveConfig();
+        renderTradeSync();
+      });
+      els.tradeType.addEventListener("change", () => {
+        const type = els.tradeType.value;
+        els.tradeTargetCode.disabled = type !== "convert";
+        els.tradeShares.placeholder = type === "sell" || type === "convert" ? "可填卖出/转换份额" : "自动按金额估算";
+      });
       els.ocrFile.addEventListener("change", event => {
         const file = event.target.files?.[0];
         if (!file) return;
@@ -3133,6 +3449,8 @@
       els.intervalInput.value = state.config.refreshSeconds;
       els.alertInput.value = state.config.alertPercent;
       els.soundInput.checked = state.config.soundAlert;
+      els.tradeDate.value = todayInputValue();
+      els.tradeTargetCode.disabled = els.tradeType.value !== "convert";
       bindEvents();
       renderFunds();
       renderRealtimeFundBoard();
