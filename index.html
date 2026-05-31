@@ -592,6 +592,20 @@
 
       <section>
         <div class="section-head">
+          <h2>当日实时估值曲线</h2>
+          <div class="hint" id="realtimeFundTitle">点击关注基金查看当日动态</div>
+        </div>
+        <div class="chart-panel">
+          <div class="chart-wrap">
+            <canvas id="realtimeFundChart"></canvas>
+            <div class="chart-tooltip" id="realtimeFundTooltip"></div>
+          </div>
+          <div class="history-summary" id="realtimeFundSummary">交易时间内自动绘制实时估值涨跌</div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
           <h2>历史净值曲线</h2>
           <div class="tools">
             <select id="historyRange">
@@ -938,6 +952,10 @@
       ocrImportBtn: document.querySelector("#ocrImportBtn"),
       ocrBody: document.querySelector("#ocrBody"),
       fundBody: document.querySelector("#fundBody"),
+      realtimeFundTitle: document.querySelector("#realtimeFundTitle"),
+      realtimeFundChart: document.querySelector("#realtimeFundChart"),
+      realtimeFundTooltip: document.querySelector("#realtimeFundTooltip"),
+      realtimeFundSummary: document.querySelector("#realtimeFundSummary"),
       historyRange: document.querySelector("#historyRange"),
       historyBtn: document.querySelector("#historyBtn"),
       historyChart: document.querySelector("#historyChart"),
@@ -2052,6 +2070,7 @@
           state.config.selectedFund = fund.code;
           saveConfig();
           renderFunds();
+          renderRealtimeFundBoard();
           renderHistory();
           renderSignals();
           renderHoldings();
@@ -2070,6 +2089,53 @@
       els.totalProfit.className = `value ${cls(totalProfit)}`;
       els.totalProfitRate.textContent = Number.isFinite(totalRate) ? pct(totalRate) : "--";
       els.totalProfitRate.className = `value ${cls(totalRate)}`;
+    }
+
+    function renderRealtimeFundBoard() {
+      const code = state.config.selectedFund;
+      const fund = state.config.funds.find(item => item.code === code);
+      const quote = state.quotes.get(code) || {};
+      const trend = state.fundIntraday.get(code);
+      const rows = (trend?.rows || []).map(row => ({
+        date: new Date(row.t).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+        value: row.value,
+        changePct: row.value,
+        change: NaN,
+        stage: row.stage
+      }));
+      const latest = rows.at(-1);
+      const sessionLabel = trend?.label || (fund ? marketSession(inferFundMarket(fund, quote)).label : "");
+      els.realtimeFundTitle.textContent = fund
+        ? `${code} ${quote.name || fund.alias || ""}`
+        : "点击关注基金查看当日动态";
+
+      if (!fund) {
+        els.realtimeFundSummary.textContent = "先添加或选择一只关注基金";
+        drawRealtimeFundChart([]);
+        return;
+      }
+
+      if (rows.length < 2) {
+        const current = Number.isFinite(quote.estimateChange) ? pct(quote.estimateChange) : "--";
+        els.realtimeFundSummary.innerHTML = `
+          <span>${escapeHtml(sessionLabel || "等待交易")}</span>
+          <span>当前估值 ${current}</span>
+          <span>交易开始后曲线会按刷新节奏追加点位</span>
+        `;
+        drawRealtimeFundChart(rows);
+        return;
+      }
+
+      const min = Math.min(...rows.map(row => row.value));
+      const max = Math.max(...rows.map(row => row.value));
+      els.realtimeFundSummary.innerHTML = `
+        <span>${escapeHtml(sessionLabel || "实时估值")}</span>
+        <span>最新 <b class="${cls(latest.value)}">${pct(latest.value)}</b></span>
+        <span>最高 ${pct(max)}</span>
+        <span>最低 ${pct(min)}</span>
+        <span>点位 ${rows.length} 个</span>
+      `;
+      drawRealtimeFundChart(rows);
     }
 
     function renderHoldings() {
@@ -2393,6 +2459,100 @@
       );
     }
 
+    function drawRealtimeFundChart(rows) {
+      const canvas = els.realtimeFundChart;
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(320, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(180, Math.floor(rect.height * dpr));
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const width = canvas.width / dpr;
+      const height = canvas.height / dpr;
+      const pad = { left: 54, right: 22, top: 18, bottom: 34 };
+      const plotW = width - pad.left - pad.right;
+      const plotH = height - pad.top - pad.bottom;
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#fbfcfe";
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.strokeStyle = "#e1e6ef";
+      ctx.lineWidth = 1;
+      ctx.fillStyle = "#667085";
+      ctx.font = "12px Microsoft YaHei, Segoe UI, Arial";
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.top + plotH * i / 4;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(width - pad.right, y);
+        ctx.stroke();
+      }
+
+      if (!rows.length) {
+        ctx.fillText("暂无实时估值点，等待刷新", pad.left, pad.top + 30);
+        canvas._chartData = null;
+        return;
+      }
+
+      const values = rows.map(row => row.value).filter(Number.isFinite);
+      const min = Math.min(...values, 0);
+      const max = Math.max(...values, 0);
+      const span = max - min || 1;
+      const xAt = index => pad.left + (rows.length === 1 ? plotW : plotW * index / (rows.length - 1));
+      const yAt = value => pad.top + plotH - (value - min) / span * plotH;
+      const latest = rows.at(-1);
+      const lineColor = latest.value >= 0 ? "#c81e1e" : "#078447";
+
+      ctx.strokeStyle = "#d8dee9";
+      const zeroY = yAt(0);
+      ctx.beginPath();
+      ctx.moveTo(pad.left, zeroY);
+      ctx.lineTo(width - pad.right, zeroY);
+      ctx.stroke();
+
+      if (rows.length > 1) {
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = 2.4;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        rows.forEach((row, index) => {
+          const x = xAt(index);
+          const y = yAt(row.value);
+          if (index === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        const gradient = ctx.createLinearGradient(0, pad.top, 0, height - pad.bottom);
+        gradient.addColorStop(0, latest.value >= 0 ? "rgba(200, 30, 30, .18)" : "rgba(7, 132, 71, .18)");
+        gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+        ctx.lineTo(xAt(rows.length - 1), height - pad.bottom);
+        ctx.lineTo(xAt(0), height - pad.bottom);
+        ctx.closePath();
+        ctx.fillStyle = gradient;
+        ctx.fill();
+      }
+
+      const lx = xAt(rows.length - 1);
+      const ly = yAt(latest.value);
+      ctx.fillStyle = lineColor;
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(lx, ly, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "#667085";
+      ctx.fillText(pct(max), 8, pad.top + 4);
+      ctx.fillText(pct(min), 8, height - pad.bottom + 4);
+      ctx.fillText(rows[0].date, pad.left, height - 10);
+      const endText = rows.at(-1).date;
+      ctx.fillText(endText, Math.max(pad.left, width - pad.right - ctx.measureText(endText).width), height - 10);
+      canvas._chartData = { rows, pad, plotW, plotH, min, max, width, height, unit: "pct" };
+    }
+
     function drawLineChart(canvas, rows, emptyText) {
       const rect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
@@ -2518,7 +2678,7 @@
       const y = data.pad.top + data.plotH - (row.value - data.min) / span * data.plotH;
       tooltip.innerHTML = `
         <div><strong>${escapeHtml(row.date)}</strong></div>
-        <div>数值：${money(row.value)}</div>
+        <div>数值：${data.unit === "pct" ? pct(row.value) : money(row.value)}</div>
         <div>涨幅：<span class="${cls(row.changePct)}">${Number.isFinite(row.changePct) ? pct(row.changePct) : "--"}</span></div>
         <div>涨跌：<span class="${cls(row.change)}">${Number.isFinite(row.change) ? money(row.change) : "--"}</span></div>
       `;
@@ -2687,6 +2847,7 @@
       }
 
       renderFunds();
+      renderRealtimeFundBoard();
       renderHistory();
       renderSignals();
       renderHoldings();
@@ -2843,6 +3004,7 @@
       state.config.selectedFund = clean;
       saveConfig();
       renderFunds();
+      renderRealtimeFundBoard();
       refreshNow();
     }
 
@@ -2872,9 +3034,11 @@
       els.historyRange.addEventListener("change", () => refreshSelectedHistory());
       els.indexHistoryBtn.addEventListener("click", () => refreshIndexHistory(false));
       els.indexHistoryRange.addEventListener("change", () => refreshIndexHistory());
+      bindChartPointer(els.realtimeFundChart, els.realtimeFundTooltip, renderRealtimeFundBoard);
       bindChartPointer(els.historyChart, els.historyTooltip, renderHistory);
       bindChartPointer(els.indexHistoryChart, els.indexHistoryTooltip, renderIndexHistory);
       window.addEventListener("resize", () => {
+        renderRealtimeFundBoard();
         renderHistory();
         renderIndexHistory();
         renderSignals();
@@ -2923,6 +3087,7 @@
         fund[target.dataset.field] = Math.max(0, Number(target.value) || 0);
         saveConfig();
         renderFunds();
+        renderRealtimeFundBoard();
       });
       els.removeBtn.addEventListener("click", () => {
         const selected = [...document.querySelectorAll("[data-check]:checked")].map(input => input.dataset.check);
@@ -2932,6 +3097,8 @@
         if (selected.includes(state.config.selectedFund)) state.config.selectedFund = state.config.funds[0]?.code || "";
         saveConfig();
         renderFunds();
+        renderRealtimeFundBoard();
+        renderHistory();
         renderSignals();
         renderHoldings();
         renderRebalance();
@@ -2943,6 +3110,7 @@
         state.config.selectedFund = "";
         saveConfig();
         renderFunds();
+        renderRealtimeFundBoard();
         renderHistory();
         renderSignals();
         renderHoldings();
@@ -2967,6 +3135,7 @@
       els.soundInput.checked = state.config.soundAlert;
       bindEvents();
       renderFunds();
+      renderRealtimeFundBoard();
       renderHistory();
       renderSignals();
       renderHoldings();
