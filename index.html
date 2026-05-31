@@ -280,10 +280,78 @@
       text-decoration: none;
     }
     a.inline-link:hover { text-decoration: underline; }
+    .ocr-panel {
+      display: grid;
+      grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+      gap: 12px;
+      padding: 12px;
+    }
+    .ocr-drop {
+      display: grid;
+      place-items: center;
+      min-height: 180px;
+      border: 1px dashed #9aa7bd;
+      border-radius: 8px;
+      background: #fbfcfe;
+      color: var(--muted);
+      text-align: center;
+      padding: 14px;
+      cursor: pointer;
+    }
+    .ocr-drop input { display: none; }
+    .ocr-preview {
+      max-width: 100%;
+      max-height: 260px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      display: none;
+    }
+    .ocr-text {
+      width: 100%;
+      min-height: 160px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px;
+      font: 13px/1.55 Consolas, "Microsoft YaHei", monospace;
+    }
+    .ocr-progress {
+      height: 8px;
+      border-radius: 999px;
+      background: #e7ebf2;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    .ocr-progress span {
+      display: block;
+      width: 0%;
+      height: 100%;
+      background: var(--accent);
+      transition: width .2s ease;
+    }
+    .ocr-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .ocr-grid label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .ocr-grid input { width: 100%; }
+    .ocr-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
     @media (max-width: 1120px) {
       main { grid-template-columns: 1fr; }
       .toolbar { grid-template-columns: 1fr 1fr; }
       .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .ocr-panel { grid-template-columns: 1fr; }
     }
     @media (max-width: 680px) {
       header { display: block; }
@@ -340,6 +408,51 @@
           <div class="metric"><div class="label">浮动收益</div><div class="value" id="totalProfit">--</div></div>
           <div class="metric"><div class="label">收益率</div><div class="value" id="totalProfitRate">--</div></div>
         </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>截图识别持仓</h2>
+          <div class="hint">支持支付宝、天天基金、财付通等持有页截图，本地 OCR，不上传图片</div>
+        </div>
+        <div class="ocr-panel">
+          <label class="ocr-drop" id="ocrDrop">
+            <input id="ocrFile" type="file" accept="image/*">
+            <div>
+              <strong>点击选择截图</strong><br>
+              <span>建议截到基金名称、代码、持有金额、持有份额、收益、持仓日期</span>
+              <div class="ocr-progress"><span id="ocrProgress"></span></div>
+            </div>
+          </label>
+          <div>
+            <img class="ocr-preview" id="ocrPreview" alt="截图预览">
+            <textarea class="ocr-text" id="ocrText" placeholder="OCR 识别文字会显示在这里，也可以直接粘贴支付宝/天天基金/财付通持仓文字后点击解析"></textarea>
+            <div class="ocr-actions">
+              <button class="mini" id="ocrRunBtn">识别截图</button>
+              <button class="mini" id="ocrParseBtn">解析文字</button>
+              <button class="mini primary" id="ocrImportBtn">导入关注列表</button>
+            </div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>基金代码</th>
+                <th>基金名称</th>
+                <th>平台</th>
+                <th>持有份额</th>
+                <th>持有金额</th>
+                <th>持有收益</th>
+                <th>收益率</th>
+                <th>持仓日期</th>
+                <th>置信度</th>
+              </tr>
+            </thead>
+            <tbody id="ocrBody"></tbody>
+          </table>
+        </div>
+        <div class="notice">OCR 会受截图清晰度、字体和遮挡影响。导入前请核对识别结果；持有金额会作为总成本的参考值，份额会写入关注基金。</div>
       </section>
 
       <section>
@@ -682,6 +795,8 @@
       selectedIndex: "100.NDX",
       stocks: new Map(),
       selectedHoldingCodes: [],
+      ocrImage: null,
+      ocrRows: [],
       timer: null,
       refreshing: false
     };
@@ -697,6 +812,14 @@
       alertInput: document.querySelector("#alertInput"),
       soundInput: document.querySelector("#soundInput"),
       removeBtn: document.querySelector("#removeBtn"),
+      ocrFile: document.querySelector("#ocrFile"),
+      ocrPreview: document.querySelector("#ocrPreview"),
+      ocrText: document.querySelector("#ocrText"),
+      ocrProgress: document.querySelector("#ocrProgress"),
+      ocrRunBtn: document.querySelector("#ocrRunBtn"),
+      ocrParseBtn: document.querySelector("#ocrParseBtn"),
+      ocrImportBtn: document.querySelector("#ocrImportBtn"),
+      ocrBody: document.querySelector("#ocrBody"),
       fundBody: document.querySelector("#fundBody"),
       historyRange: document.querySelector("#historyRange"),
       historyBtn: document.querySelector("#historyBtn"),
@@ -739,6 +862,152 @@
 
     function saveConfig() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state.config));
+    }
+
+    function parseOcrNumber(value) {
+      if (!value) return 0;
+      const clean = String(value)
+        .replace(/[,\s，]/g, "")
+        .replace(/[￥¥元份%]/g, "")
+        .replace(/[Oo]/g, "0")
+        .replace(/[Il]/g, "1");
+      const match = clean.match(/[-+]?\d+(?:\.\d+)?/);
+      return match ? Number(match[0]) : 0;
+    }
+
+    function normalizeOcrText(text) {
+      return String(text || "")
+        .replace(/\r/g, "\n")
+        .replace(/[ \t]+/g, " ")
+        .replace(/[：﹕]/g, ":")
+        .replace(/[，]/g, ",");
+    }
+
+    function findNearNumber(lines, keywords, maxLookAhead = 2) {
+      for (let i = 0; i < lines.length; i += 1) {
+        if (!keywords.some(word => lines[i].includes(word))) continue;
+        const segment = lines.slice(i, i + maxLookAhead + 1).join(" ");
+        const number = segment.match(/[-+]?¥?\s*\d[\d,，]*(?:\.\d+)?\s*(?:元|份|%)?/);
+        if (number) return parseOcrNumber(number[0]);
+      }
+      return 0;
+    }
+
+    function findNearText(lines, keywords, pattern) {
+      for (let i = 0; i < lines.length; i += 1) {
+        if (!keywords.some(word => lines[i].includes(word))) continue;
+        const segment = lines.slice(i, i + 3).join(" ");
+        const match = segment.match(pattern);
+        if (match) return match[1] || match[0];
+      }
+      return "";
+    }
+
+    function detectOcrPlatform(text) {
+      if (/天天基金|东方财富/.test(text)) return "天天基金";
+      if (/支付宝|蚂蚁|余额宝/.test(text)) return "支付宝";
+      if (/财付通|微信|腾讯理财通|理财通/.test(text)) return "财付通/理财通";
+      return "未知平台";
+    }
+
+    function parseHoldingScreenshotText(rawText) {
+      const text = normalizeOcrText(rawText);
+      const lines = text.split("\n").map(line => line.trim()).filter(Boolean);
+      const codes = [...new Set((text.match(/\b\d{6}\b/g) || []).filter(code => !/^20\d{4}$/.test(code)))];
+      const platform = detectOcrPlatform(text);
+      const date = findNearText(lines, ["持有日期", "持仓日期", "确认日期", "买入日期", "交易日"], /(20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2})/) ||
+        (text.match(/20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}/)?.[0] || "");
+      const shares = findNearNumber(lines, ["持有份额", "持仓份额", "份额", "持有数量", "持仓数量"]);
+      const amount = findNearNumber(lines, ["持有金额", "持仓金额", "持有市值", "资产", "金额"]);
+      const profit = findNearNumber(lines, ["持有收益", "累计收益", "收益", "盈亏"]);
+      const profitRate = findNearNumber(lines, ["收益率", "持有收益率", "盈亏率"]);
+      const rows = (codes.length ? codes : [""]).map(code => {
+        const codeIndex = code ? text.indexOf(code) : -1;
+        const before = codeIndex >= 0 ? text.slice(Math.max(0, codeIndex - 45), codeIndex) : lines.slice(0, 4).join(" ");
+        const after = codeIndex >= 0 ? text.slice(codeIndex + code.length, codeIndex + code.length + 45) : "";
+        const nameMatch = `${before} ${after}`.match(/[\u4e00-\u9fa5A-Za-z0-9（）()·\-]{3,36}(?:基金|混合|股票|债券|指数|ETF|联接|QDII|LOF|C|A)?/);
+        const name = nameMatch ? nameMatch[0].replace(/^(持有|详情|基金|名称)/, "").trim() : "";
+        const confidence = [code, shares, amount, profit || profitRate, date].filter(Boolean).length;
+        return { code, name, platform, shares, amount, profit, profitRate, date, confidence };
+      });
+      return rows;
+    }
+
+    function renderOcrRows() {
+      els.ocrBody.innerHTML = "";
+      if (!state.ocrRows.length) {
+        els.ocrBody.innerHTML = `<tr><td colspan="9" class="muted">上传截图或粘贴文字后，点击解析</td></tr>`;
+        return;
+      }
+      state.ocrRows.forEach((row, index) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><input data-ocr="${index}" data-field="code" value="${escapeHtml(row.code || "")}" placeholder="6位代码"></td>
+          <td><input data-ocr="${index}" data-field="name" value="${escapeHtml(row.name || "")}" placeholder="基金名称"></td>
+          <td><input data-ocr="${index}" data-field="platform" value="${escapeHtml(row.platform || "")}"></td>
+          <td><input data-ocr="${index}" data-field="shares" type="number" step="0.01" value="${row.shares || ""}"></td>
+          <td><input data-ocr="${index}" data-field="amount" type="number" step="0.01" value="${row.amount || ""}"></td>
+          <td><input data-ocr="${index}" data-field="profit" type="number" step="0.01" value="${row.profit || ""}"></td>
+          <td><input data-ocr="${index}" data-field="profitRate" type="number" step="0.01" value="${row.profitRate || ""}"></td>
+          <td><input data-ocr="${index}" data-field="date" value="${escapeHtml(row.date || "")}"></td>
+          <td>${row.confidence || 0}/5</td>
+        `;
+        els.ocrBody.appendChild(tr);
+      });
+    }
+
+    async function runScreenshotOcr() {
+      if (!state.ocrImage) return alert("请先选择一张持仓截图");
+      els.ocrRunBtn.disabled = true;
+      els.ocrProgress.style.width = "3%";
+      els.ocrText.value = "正在加载 OCR 引擎并识别截图...";
+      try {
+        if (!window.Tesseract) {
+          await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js", 20000);
+        }
+        const result = await Tesseract.recognize(state.ocrImage, "chi_sim+eng", {
+          logger: info => {
+            if (info.status === "recognizing text") {
+              els.ocrProgress.style.width = `${Math.max(5, Math.round(info.progress * 100))}%`;
+            }
+          }
+        });
+        els.ocrProgress.style.width = "100%";
+        els.ocrText.value = result?.data?.text || "";
+        state.ocrRows = parseHoldingScreenshotText(els.ocrText.value);
+        renderOcrRows();
+      } catch (error) {
+        els.ocrText.value = `OCR 识别失败：${error.message || error}`;
+      } finally {
+        els.ocrRunBtn.disabled = false;
+      }
+    }
+
+    function parseOcrTextInput() {
+      state.ocrRows = parseHoldingScreenshotText(els.ocrText.value);
+      renderOcrRows();
+    }
+
+    function importOcrRows() {
+      const rows = state.ocrRows
+        .map(row => ({ ...row, code: String(row.code || "").replace(/\D/g, "").slice(0, 6) }))
+        .filter(row => /^\d{6}$/.test(row.code));
+      if (!rows.length) return alert("没有可导入的 6 位基金代码，请先修正识别结果");
+      for (const row of rows) {
+        const existing = state.config.funds.find(fund => fund.code === row.code);
+        const target = existing || { code: row.code, alias: row.name || row.code, shares: 0, cost: 0, fee: 0 };
+        target.alias = row.name || target.alias;
+        if (row.shares) target.shares = row.shares;
+        if (row.amount) target.cost = row.amount;
+        target.source = row.platform || target.source;
+        target.holdingDate = row.date || target.holdingDate;
+        if (!existing) state.config.funds.push(target);
+      }
+      state.config.selectedFund = rows[0].code;
+      saveConfig();
+      renderFunds();
+      refreshNow();
+      alert(`已导入/更新 ${rows.length} 条持仓`);
     }
 
     function jsonp(url, callbackParam, timeoutMs = 10000, fixedName = "") {
@@ -1917,6 +2186,28 @@
       els.intervalInput.addEventListener("change", saveSettings);
       els.alertInput.addEventListener("change", saveSettings);
       els.soundInput.addEventListener("change", saveSettings);
+      els.ocrFile.addEventListener("change", event => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        state.ocrImage = file;
+        els.ocrPreview.src = URL.createObjectURL(file);
+        els.ocrPreview.style.display = "block";
+        els.ocrProgress.style.width = "0%";
+        els.ocrText.value = "";
+        state.ocrRows = [];
+        renderOcrRows();
+      });
+      els.ocrRunBtn.addEventListener("click", runScreenshotOcr);
+      els.ocrParseBtn.addEventListener("click", parseOcrTextInput);
+      els.ocrImportBtn.addEventListener("click", importOcrRows);
+      els.ocrBody.addEventListener("change", event => {
+        const target = event.target;
+        if (!target.matches("[data-ocr]")) return;
+        const row = state.ocrRows[Number(target.dataset.ocr)];
+        if (!row) return;
+        const field = target.dataset.field;
+        row[field] = target.type === "number" ? Number(target.value) || 0 : target.value.trim();
+      });
       els.fundBody.addEventListener("change", event => {
         const target = event.target;
         if (!target.matches("[data-edit]")) return;
@@ -1965,6 +2256,7 @@
       renderIndexHistory();
       renderResources();
       renderStocks();
+      renderOcrRows();
       refreshNow();
       refreshIndexHistory();
     }
