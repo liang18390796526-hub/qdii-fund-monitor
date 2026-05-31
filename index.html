@@ -147,6 +147,45 @@
     }
     .up { color: var(--up); font-weight: 650; }
     .down { color: var(--down); font-weight: 650; }
+    .live-cell {
+      position: relative;
+      animation: livePulse .65s ease;
+    }
+    .live-cell::after {
+      content: "";
+      position: absolute;
+      inset: 3px 5px;
+      border-radius: 5px;
+      pointer-events: none;
+      opacity: 0;
+      animation: liveGlow .65s ease;
+    }
+    .up.live-cell::after { background: rgba(198, 40, 40, .12); }
+    .down.live-cell::after { background: rgba(11, 128, 67, .12); }
+    .refreshing-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin-right: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: blinkDot .8s infinite ease-in-out;
+      vertical-align: 1px;
+    }
+    @keyframes livePulse {
+      0% { transform: scale(1); }
+      35% { transform: scale(1.045); }
+      100% { transform: scale(1); }
+    }
+    @keyframes liveGlow {
+      0% { opacity: 0; transform: scale(.96); }
+      35% { opacity: 1; transform: scale(1); }
+      100% { opacity: 0; transform: scale(1.04); }
+    }
+    @keyframes blinkDot {
+      0%, 100% { opacity: .25; }
+      50% { opacity: 1; }
+    }
     .warn { color: var(--warn); }
     .muted { color: var(--muted); }
     .cards {
@@ -382,7 +421,7 @@
     <input id="searchInput" placeholder="输入基金名称或代码搜索，如 纳指、040046">
     <button class="primary" id="searchBtn">搜索基金</button>
     <button id="refreshBtn">立即刷新</button>
-    <label class="tools">间隔(秒)<input id="intervalInput" type="number" min="15" step="15"></label>
+    <label class="tools">间隔(秒)<input id="intervalInput" type="number" min="1" step="1"></label>
     <label class="tools">提醒(%)<input id="alertInput" type="number" min="0" step="0.1"></label>
     <div class="search-results" id="searchResults"></div>
   </div>
@@ -745,7 +784,7 @@
   <script>
     const STORAGE_KEY = "qdii-monitor-plus-v1";
     const DEFAULT_CONFIG = {
-      refreshSeconds: 60,
+      refreshSeconds: 1,
       alertPercent: 2,
       soundAlert: true,
       selectedFund: "040046",
@@ -806,6 +845,8 @@
       ocrImage: null,
       ocrRows: [],
       timer: null,
+      lastDeepRefresh: 0,
+      refreshStartedAt: 0,
       refreshing: false
     };
 
@@ -866,7 +907,12 @@
     function loadConfig() {
       try {
         const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-        return { ...structuredClone(DEFAULT_CONFIG), ...saved, funds: saved?.funds || DEFAULT_CONFIG.funds };
+        const config = { ...structuredClone(DEFAULT_CONFIG), ...saved, funds: saved?.funds || DEFAULT_CONFIG.funds };
+        if (!saved?.realtimeRefreshV2) {
+          config.refreshSeconds = 1;
+          config.realtimeRefreshV2 = true;
+        }
+        return config;
       } catch {
         return structuredClone(DEFAULT_CONFIG);
       }
@@ -1729,6 +1775,11 @@
       return "";
     }
 
+    function liveCls(value) {
+      const base = cls(value);
+      return base ? `${base} live-cell` : "live-cell";
+    }
+
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     }
@@ -1765,7 +1816,7 @@
           <td class="code">${fund.code}</td>
           <td class="name" title="${escapeHtml(quote.name || fund.alias)}">${escapeHtml(quote.name || fund.alias || "")}</td>
           <td>${nav ? money(nav) : "--"}</td>
-          <td class="${cls(quote.estimateChange)}">${Number.isFinite(quote.estimateChange) ? pct(quote.estimateChange) : "--"}</td>
+          <td class="${liveCls(quote.estimateChange)}">${Number.isFinite(quote.estimateChange) ? pct(quote.estimateChange) : "--"}</td>
           <td>${escapeHtml(quote.estimateTime || "")}</td>
           <td>${quote.nav ? money(quote.nav) : "--"} <span class="muted">${escapeHtml(quote.navDate || "")}</span></td>
           <td>${escapeHtml(buyStatus || "--")}</td>
@@ -1774,8 +1825,8 @@
           <td><input data-edit="${fund.code}" data-field="cost" type="number" min="0" step="0.01" value="${fund.cost || ""}"></td>
           <td><input data-edit="${fund.code}" data-field="fee" type="number" min="0" step="0.01" value="${fund.fee || ""}"></td>
           <td>${value ? money(value) : "--"}</td>
-          <td class="${cls(profit)}">${value ? money(profit) : "--"}</td>
-          <td class="${cls(profitRate)}">${Number.isFinite(profitRate) ? pct(profitRate) : "--"}</td>
+          <td class="${liveCls(profit)}">${value ? money(profit) : "--"}</td>
+          <td class="${liveCls(profitRate)}">${Number.isFinite(profitRate) ? pct(profitRate) : "--"}</td>
           <td class="${quote.error ? "warn" : "muted"}">${escapeHtml(quote.error || "正常")}</td>
         `;
         row.addEventListener("click", event => {
@@ -1823,7 +1874,7 @@
           <td>${escapeHtml(row.shares)}</td>
           <td>${escapeHtml(row.value)}</td>
           <td>${stock?.price ? money(stock.price) : "--"}</td>
-          <td class="${cls(stock?.changePct)}">${Number.isFinite(stock?.changePct) ? pct(stock.changePct) : "--"}</td>
+          <td class="${liveCls(stock?.changePct)}">${Number.isFinite(stock?.changePct) ? pct(stock.changePct) : "--"}</td>
         `;
         els.holdingBody.appendChild(tr);
       }
@@ -2292,8 +2343,8 @@
           <td>${escapeHtml(item.group)}</td>
           <td>${escapeHtml(item.name)}</td>
           <td>${quote?.price ? `${money(quote.price)} <span class="muted">${escapeHtml(item.unit)}</span>` : "--"}</td>
-          <td class="${cls(quote?.changePct)}">${Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--"}</td>
-          <td class="${cls(quote?.change)}">${Number.isFinite(quote?.change) ? money(quote.change) : "--"}</td>
+          <td class="${liveCls(quote?.changePct)}">${Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--"}</td>
+          <td class="${liveCls(quote?.change)}">${Number.isFinite(quote?.change) ? money(quote.change) : "--"}</td>
           <td>${quote?.amount ? money(quote.amount / 100000000) + "亿" : "--"}</td>
         `;
         els.resourceBody.appendChild(tr);
@@ -2309,8 +2360,8 @@
           <td>${escapeHtml(item.market)}</td>
           <td>${escapeHtml(item.name)}</td>
           <td>${quote?.price ? money(quote.price) : "--"}</td>
-          <td class="${cls(quote?.changePct)}">${Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--"}</td>
-          <td class="${cls(quote?.change)}">${Number.isFinite(quote?.change) ? money(quote.change) : "--"}</td>
+          <td class="${liveCls(quote?.changePct)}">${Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--"}</td>
+          <td class="${liveCls(quote?.change)}">${Number.isFinite(quote?.change) ? money(quote.change) : "--"}</td>
           <td>${quote?.amount ? money(quote.amount / 100000000) + "亿" : "--"}</td>
         `;
         if (item.secid === state.selectedIndex) tr.classList.add("selected");
@@ -2330,18 +2381,18 @@
         <td class="code">${escapeHtml(stock.symbol)}</td>
         <td>${escapeHtml(stock.name)}</td>
         <td>${stock.price ? money(stock.price) : "--"}</td>
-        <td class="${cls(stock.changePct)}">${Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--"}</td>
-        <td class="${cls(stock.change)}">${Number.isFinite(stock.change) ? money(stock.change) : "--"}</td>
+        <td class="${liveCls(stock.changePct)}">${Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--"}</td>
+        <td class="${liveCls(stock.change)}">${Number.isFinite(stock.change) ? money(stock.change) : "--"}</td>
         <td>${Number.isFinite(stock.extPrice) ? money(stock.extPrice) : "--"}</td>
-        <td class="${cls(stock.extPct)}">${Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--"}</td>
+        <td class="${liveCls(stock.extPct)}">${Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--"}</td>
         <td>${stock.amount ? money(stock.amount / 100000000) + "亿" : "--"}</td>
       ` : `
         <td class="code">${escapeHtml(stock.symbol)}</td>
         <td>${escapeHtml(stock.name)}</td>
         <td>${stock.price ? money(stock.price) : "--"}</td>
-        <td class="${cls(stock.changePct)}">${Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--"}</td>
+        <td class="${liveCls(stock.changePct)}">${Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--"}</td>
         <td>${Number.isFinite(stock.extPrice) ? money(stock.extPrice) : "--"}</td>
-        <td class="${cls(stock.extPct)}">${Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--"}</td>
+        <td class="${liveCls(stock.extPct)}">${Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--"}</td>
         <td><button class="mini">删除</button></td>
       `;
       return tr;
@@ -2351,29 +2402,36 @@
       if (state.refreshing) return;
       clearTimeout(state.timer);
       state.refreshing = true;
+      state.refreshStartedAt = Date.now();
       els.refreshBtn.disabled = true;
-      els.status.textContent = "正在刷新基金、持仓和美股行情...";
       saveSettings();
+      const fastMode = state.config.refreshSeconds <= 2;
+      const deepRefreshDue = !state.lastDeepRefresh || Date.now() - state.lastDeepRefresh > 60000 || !fastMode;
+      els.status.innerHTML = `<span class="refreshing-dot"></span>${deepRefreshDue ? "正在刷新完整行情..." : "正在秒级刷新涨跌数据..."}`;
 
       const alerts = [];
       for (const fund of state.config.funds) {
         const quote = await fetchFundQuote(fund.code);
         state.quotes.set(fund.code, quote);
-        const trade = await fetchFundTradeInfo(fund.code);
-        state.tradeInfo.set(fund.code, trade);
+        if (deepRefreshDue) {
+          const trade = await fetchFundTradeInfo(fund.code);
+          state.tradeInfo.set(fund.code, trade);
+        }
         if (!quote.error && Math.abs(quote.estimateChange) >= state.config.alertPercent) alerts.push(quote);
         renderFunds();
       }
 
-      await refreshSelectedHistory(false);
+      if (deepRefreshDue) await refreshSelectedHistory(false);
 
       const holdingCodes = [];
-      for (const fund of state.config.funds) {
-        const holding = await fetchHoldings(fund.code);
-        state.holdings.set(fund.code, holding);
-        holding.rows.forEach(row => row.secid && holdingCodes.push(row.secid));
+      if (deepRefreshDue) {
+        for (const fund of state.config.funds) {
+          const holding = await fetchHoldings(fund.code);
+          state.holdings.set(fund.code, holding);
+          holding.rows.forEach(row => row.secid && holdingCodes.push(row.secid));
+        }
+        state.selectedHoldingCodes = [...new Set(holdingCodes)];
       }
-      state.selectedHoldingCodes = [...new Set(holdingCodes)];
 
       const watchSecids = state.config.stockWatch.map(secidFromSymbol);
       const fundSecids = state.config.funds.map(fund => secidFromFundCode(fund.code)).filter(Boolean);
@@ -2394,11 +2452,13 @@
       renderRebalance();
       renderStocks();
       const now = new Date().toLocaleString();
-      els.status.textContent = `上次刷新: ${now}，基金 ${state.config.funds.length} 只，个股 ${stocks.length} 只`;
+      const elapsed = ((Date.now() - state.refreshStartedAt) / 1000).toFixed(1);
+      if (deepRefreshDue) state.lastDeepRefresh = Date.now();
+      els.status.textContent = `上次刷新: ${now}，耗时 ${elapsed}s，模式 ${deepRefreshDue ? "完整" : "秒级"}，基金 ${state.config.funds.length} 只，个股 ${stocks.length} 只`;
       if (alerts.length) notifyAlerts(alerts);
       state.refreshing = false;
       els.refreshBtn.disabled = false;
-      state.timer = setTimeout(refreshNow, Math.max(15, state.config.refreshSeconds) * 1000);
+      state.timer = setTimeout(refreshNow, Math.max(1, state.config.refreshSeconds) * 1000);
     }
 
     async function refreshSelectedHoldings() {
@@ -2546,7 +2606,7 @@
     }
 
     function saveSettings() {
-      state.config.refreshSeconds = Math.max(15, Number(els.intervalInput.value) || 60);
+      state.config.refreshSeconds = Math.max(1, Number(els.intervalInput.value) || 1);
       state.config.alertPercent = Math.max(0, Number(els.alertInput.value) || 0);
       state.config.soundAlert = els.soundInput.checked;
       saveConfig();
