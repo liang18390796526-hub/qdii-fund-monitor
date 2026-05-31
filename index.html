@@ -433,6 +433,7 @@
               <button class="mini" id="ocrParseBtn">解析文字</button>
               <button class="mini" id="ocrAddRowBtn">新增手动行</button>
               <button class="mini" id="ocrResolveBtn">按名称补代码</button>
+              <button class="mini" id="ocrClearBtn">清除识别</button>
               <button class="mini primary" id="ocrImportBtn">导入关注列表</button>
             </div>
           </div>
@@ -826,6 +827,7 @@
       ocrParseBtn: document.querySelector("#ocrParseBtn"),
       ocrAddRowBtn: document.querySelector("#ocrAddRowBtn"),
       ocrResolveBtn: document.querySelector("#ocrResolveBtn"),
+      ocrClearBtn: document.querySelector("#ocrClearBtn"),
       ocrImportBtn: document.querySelector("#ocrImportBtn"),
       ocrBody: document.querySelector("#ocrBody"),
       fundBody: document.querySelector("#fundBody"),
@@ -1115,6 +1117,19 @@
 
     function addManualOcrRow() {
       state.ocrRows.push(blankOcrRow(detectOcrPlatform(els.ocrText.value)));
+      renderOcrRows();
+    }
+
+    function clearOcrWorkspace() {
+      state.ocrImage = null;
+      state.ocrRows = [];
+      if (els.ocrFile) els.ocrFile.value = "";
+      if (els.ocrPreview) {
+        els.ocrPreview.removeAttribute("src");
+        els.ocrPreview.style.display = "none";
+      }
+      els.ocrText.value = "";
+      els.ocrProgress.style.width = "0%";
       renderOcrRows();
     }
 
@@ -2547,6 +2562,7 @@
       els.ocrParseBtn.addEventListener("click", parseOcrTextInput);
       els.ocrAddRowBtn.addEventListener("click", addManualOcrRow);
       els.ocrResolveBtn.addEventListener("click", resolveOcrCodesByName);
+      els.ocrClearBtn.addEventListener("click", clearOcrWorkspace);
       els.ocrImportBtn.addEventListener("click", importOcrRows);
       els.ocrBody.addEventListener("click", event => {
         const button = event.target.closest("[data-ocr-action]");
