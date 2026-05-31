@@ -158,6 +158,15 @@
       animation: liveNumberFade .5s ease;
       will-change: opacity, filter;
     }
+    .cell-time {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 400;
+      line-height: 1.2;
+      font-variant-numeric: tabular-nums;
+    }
     .refreshing-dot {
       display: inline-block;
       width: 7px;
@@ -2091,6 +2100,23 @@
       return `<span class="live-num">${text}</span>`;
     }
 
+    function withCellTime(main, time, tag = "") {
+      const meta = [tag, time].filter(Boolean).join(" ");
+      return `${main}${meta ? `<span class="cell-time">${escapeHtml(meta)}</span>` : ""}`;
+    }
+
+    function normalizeDateTimeText(value, fallbackTime = "") {
+      const text = String(value || "").trim();
+      if (/^\d{4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}/.test(text)) return text.replace(/(\d{1,2}:\d{2}).*$/, "$1");
+      if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(text)) return fallbackTime ? `${text} ${fallbackTime}` : text;
+      return text;
+    }
+
+    function currentMinuteText() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    }
+
     function renderSpark(secid, fallbackPct = NaN) {
       const data = state.intraday.get(secid);
       const rows = data?.rows || [];
@@ -2363,6 +2389,14 @@
         const useOfficialAsEstimate = officialIsNewerThanEstimate(latestOfficial, quote);
         const displayNav = useOfficialAsEstimate ? latestOfficial.nav : nav;
         const displayNavLabel = useOfficialAsEstimate ? "实际" : "";
+        const estimateTimeText = useOfficialAsEstimate
+          ? normalizeDateTimeText(latestOfficial?.date, "收盘后")
+          : normalizeDateTimeText(quote.estimateTime || quote.navDate);
+        const preTimeText = Number.isFinite(preChange) ? currentMinuteText() : "";
+        const regularTimeText = Number.isFinite(regularChange) ? normalizeDateTimeText(quote.estimateTime) : "";
+        const postTimeText = Number.isFinite(officialChange)
+          ? normalizeDateTimeText(latestOfficial?.date, "正式净值")
+          : (Number.isFinite(postChange) ? normalizeDateTimeText(quote.estimateTime) : "");
 
         const selected = state.config.selectedFund === fund.code;
         const row = document.createElement("tr");
@@ -2371,10 +2405,10 @@
           <td><input type="checkbox" data-check="${fund.code}"></td>
           <td class="code">${fund.code}</td>
           <td class="name" title="${escapeHtml(quote.name || fund.alias)}">${escapeHtml(quote.name || fund.alias || "")}</td>
-          <td>${displayNav ? `${money(displayNav)}${displayNavLabel ? ` <span class="muted">${displayNavLabel}</span>` : ""}` : "--"}</td>
-          <td class="${liveCls(preChange)}">${liveText(Number.isFinite(preChange) ? pct(preChange) : "--")}</td>
-          <td class="${liveCls(regularChange)}">${liveText(Number.isFinite(regularChange) ? pct(regularChange) : "--")}</td>
-          <td class="${liveCls(postChange)}">${liveText(Number.isFinite(postChange) ? `${pct(postChange)}${postLabel ? ` <span class="muted">${postLabel}</span>` : ""}` : "--")}</td>
+          <td>${displayNav ? withCellTime(`${money(displayNav)}${displayNavLabel ? ` <span class="muted">${displayNavLabel}</span>` : ""}`, estimateTimeText) : "--"}</td>
+          <td class="${liveCls(preChange)}">${liveText(Number.isFinite(preChange) ? withCellTime(pct(preChange), preTimeText, "预测") : "--")}</td>
+          <td class="${liveCls(regularChange)}">${liveText(Number.isFinite(regularChange) ? withCellTime(pct(regularChange), regularTimeText, "实时") : "--")}</td>
+          <td class="${liveCls(postChange)}">${liveText(Number.isFinite(postChange) ? withCellTime(pct(postChange), postTimeText, postLabel || "估值") : "--")}</td>
           <td>${renderFundTrend(fund.code, currentEstimateChange)}</td>
           <td>${escapeHtml(quote.estimateTime || "")}</td>
           <td>${latestNav ? money(latestNav) : "--"} <span class="muted">${escapeHtml(latestNavDate)}</span></td>
