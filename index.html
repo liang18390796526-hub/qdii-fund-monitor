@@ -168,6 +168,21 @@
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
     }
+    .quote-cell {
+      min-width: 138px;
+      line-height: 1.35;
+      vertical-align: middle;
+    }
+    .quote-cell.wide {
+      min-width: 168px;
+    }
+    .quote-cell .live-num {
+      min-width: 92px;
+      white-space: nowrap;
+    }
+    .table-wrap table {
+      min-width: max-content;
+    }
     .refreshing-dot {
       display: inline-block;
       width: 7px;
@@ -2076,6 +2091,7 @@
       const change = scaled(item.f4, div);
       const extPrice = firstValid([scaled(item.f49, div), scaled(item.f51, div), scaled(item.f50, div), scaled(item.f48, div)]);
       const extPct = firstValid([scaled(item.f171, 100), scaled(item.f169, 100)]);
+      const updatedAt = currentMinuteText();
       return {
         secid: item.f13 ? `${item.f13}.${item.f12}` : "",
         symbol: item.f12,
@@ -2085,7 +2101,8 @@
         change,
         amount: Number(item.f6),
         extPrice,
-        extPct
+        extPct,
+        updatedAt
       };
     }
 
@@ -2168,6 +2185,10 @@
     function withCellTime(main, time, tag = "") {
       const meta = [tag, time].filter(Boolean).join(" ");
       return `${main}${meta ? `<span class="cell-time">${escapeHtml(meta)}</span>` : ""}`;
+    }
+
+    function quoteTimeText(quote, fallback = "") {
+      return normalizeDateTimeText(quote?.updatedAt || quote?.quoteTime || quote?.time || fallback || currentMinuteText());
     }
 
     function normalizeDateTimeText(value, fallbackTime = "") {
@@ -2470,10 +2491,10 @@
           <td><input type="checkbox" data-check="${fund.code}"></td>
           <td class="code">${fund.code}</td>
           <td class="name" title="${escapeHtml(quote.name || fund.alias)}">${escapeHtml(quote.name || fund.alias || "")}</td>
-          <td>${displayNav ? withCellTime(`${money(displayNav)}${displayNavLabel ? ` <span class="muted">${displayNavLabel}</span>` : ""}`, estimateTimeText) : "--"}</td>
-          <td class="${liveCls(preChange)}">${liveText(Number.isFinite(preChange) ? withCellTime(pct(preChange), preTimeText, "预测") : "--")}</td>
-          <td class="${liveCls(regularChange)}">${liveText(Number.isFinite(regularChange) ? withCellTime(pct(regularChange), regularTimeText, "实时") : "--")}</td>
-          <td class="${liveCls(postChange)}">${liveText(Number.isFinite(postChange) ? withCellTime(pct(postChange), postTimeText, postLabel || "估值") : "--")}</td>
+          <td class="quote-cell">${displayNav ? withCellTime(`${money(displayNav)}${displayNavLabel ? ` <span class="muted">${displayNavLabel}</span>` : ""}`, estimateTimeText) : "--"}</td>
+          <td class="${liveCls(preChange)} quote-cell">${liveText(Number.isFinite(preChange) ? withCellTime(pct(preChange), preTimeText, "预测") : "--")}</td>
+          <td class="${liveCls(regularChange)} quote-cell">${liveText(Number.isFinite(regularChange) ? withCellTime(pct(regularChange), regularTimeText, "实时") : "--")}</td>
+          <td class="${liveCls(postChange)} quote-cell">${liveText(Number.isFinite(postChange) ? withCellTime(pct(postChange), postTimeText, postLabel || "估值") : "--")}</td>
           <td>${renderFundTrend(fund.code, currentEstimateChange)}</td>
           <td>${escapeHtml(quote.estimateTime || "")}</td>
           <td>${latestNav ? money(latestNav) : "--"} <span class="muted">${escapeHtml(latestNavDate)}</span></td>
@@ -2483,8 +2504,8 @@
           <td><input data-edit="${fund.code}" data-field="cost" type="number" min="0" step="0.01" value="${fund.cost || ""}"></td>
           <td><input data-edit="${fund.code}" data-field="fee" type="number" min="0" step="0.01" value="${fund.fee || ""}"></td>
           <td>${value ? money(value) : "--"}</td>
-          <td class="${liveCls(profit)}">${liveText(value ? money(profit) : "--")}</td>
-          <td class="${liveCls(profitRate)}">${liveText(Number.isFinite(profitRate) ? pct(profitRate) : "--")}</td>
+          <td class="${liveCls(profit)} quote-cell">${liveText(value ? withCellTime(money(profit), estimateTimeText, "更新") : "--")}</td>
+          <td class="${liveCls(profitRate)} quote-cell">${liveText(Number.isFinite(profitRate) ? withCellTime(pct(profitRate), estimateTimeText, "更新") : "--")}</td>
           <td class="${quote.error ? "warn" : "muted"}">${escapeHtml(quote.error || "正常")}</td>
         `;
         row.addEventListener("click", event => {
@@ -2724,7 +2745,7 @@
           <td>${escapeHtml(row.shares)}</td>
           <td>${escapeHtml(row.value)}</td>
           <td>${stock?.price ? money(stock.price) : "--"}</td>
-          <td class="${liveCls(stock?.changePct)}">${liveText(Number.isFinite(stock?.changePct) ? pct(stock.changePct) : "--")}</td>
+          <td class="${liveCls(stock?.changePct)} quote-cell">${liveText(Number.isFinite(stock?.changePct) ? withCellTime(pct(stock.changePct), quoteTimeText(stock), "实时") : "--")}</td>
         `;
         els.holdingBody.appendChild(tr);
       }
@@ -2876,6 +2897,7 @@
           name: "天天基金估算",
           value: primary,
           meta: quote.estimateTime || "--",
+          time: normalizeDateTimeText(quote.estimateTime),
           note: "当前主估值源",
           base: true
         });
@@ -2887,6 +2909,7 @@
           name: "最新净值日涨跌",
           value: latestHistory.changePct,
           meta: latestHistory.date,
+          time: normalizeDateTimeText(latestHistory.date, "正式净值"),
           note: "正式净值的上一交易日涨跌，日期可能滞后"
         });
       }
@@ -2897,6 +2920,7 @@
           name: "持仓前十加权",
           value: holdingSignals.regular,
           meta: `覆盖 ${holdingSignals.coverage.toFixed(2)}%`,
+          time: holdingSignals.regularTime,
           note: "用披露持仓权重 x 个股实时涨跌估算"
         });
       }
@@ -2905,6 +2929,7 @@
           name: "持仓扩展盘加权",
           value: holdingSignals.extended,
           meta: `覆盖 ${holdingSignals.extCoverage.toFixed(2)}%`,
+          time: holdingSignals.extTime,
           note: "用披露持仓权重 x 盘前/盘后涨跌估算"
         });
       }
@@ -2914,6 +2939,7 @@
           name: "场内交易价格",
           value: fundStock.changePct,
           meta: fundStock.price ? `现价 ${money(fundStock.price)}` : "--",
+          time: quoteTimeText(fundStock),
           note: "仅 ETF/LOF 等场内基金可用，含折溢价"
         });
       }
@@ -2925,6 +2951,7 @@
           name: "同花顺备用源",
           value: Number(ths?.value),
           meta: ths?.time || (thsConnected ? "代理已连接" : ths?.error ? "接口异常" : "等待刷新"),
+          time: normalizeDateTimeText(ths?.time || ""),
           note: ths?.error || "来自你配置的同花顺/本地代理接口"
         });
       } else {
@@ -2943,8 +2970,8 @@
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td>${escapeHtml(row.name)}</td>
-          <td class="${cls(row.value)}">${Number.isFinite(row.value) ? pct(row.value) : "--"}</td>
-          <td class="${cls(error)}">${row.base ? "基准" : Number.isFinite(error) ? pct(error) : "--"}</td>
+          <td class="${cls(row.value)} quote-cell">${Number.isFinite(row.value) ? withCellTime(pct(row.value), row.time, "更新") : "--"}</td>
+          <td class="${cls(error)} quote-cell">${row.base ? withCellTime("基准", row.time, "更新") : Number.isFinite(error) ? withCellTime(pct(error), row.time, "误差") : "--"}</td>
           <td>${escapeHtml(row.meta)}</td>
           <td class="muted">${escapeHtml(row.note)}</td>
         `;
@@ -2957,6 +2984,8 @@
       let coverage = 0;
       let extended = 0;
       let extCoverage = 0;
+      let regularTime = "";
+      let extTime = "";
       for (const row of holding?.rows || []) {
         const weight = parsePercent(row.ratio);
         const stock = state.stocks.get(row.secid);
@@ -2964,17 +2993,21 @@
         if (Number.isFinite(stock.changePct)) {
           regular += weight * stock.changePct / 100;
           coverage += weight;
+          regularTime = stock.updatedAt || regularTime;
         }
         if (Number.isFinite(stock.extPct)) {
           extended += weight * stock.extPct / 100;
           extCoverage += weight;
+          extTime = stock.updatedAt || extTime;
         }
       }
       return {
         regular: coverage ? regular : NaN,
         coverage,
         extended: extCoverage ? extended : NaN,
-        extCoverage
+        extCoverage,
+        regularTime: regularTime ? quoteTimeText({ updatedAt: regularTime }) : "",
+        extTime: extTime ? quoteTimeText({ updatedAt: extTime }) : ""
       };
     }
 
@@ -3306,8 +3339,8 @@
           <td>${escapeHtml(item.group)}</td>
           <td>${escapeHtml(item.name)}</td>
           <td>${quote?.price ? `${money(quote.price)} <span class="muted">${escapeHtml(item.unit)}</span>` : "--"}</td>
-          <td class="${liveCls(quote?.changePct)}">${liveText(Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--")}</td>
-          <td class="${liveCls(quote?.change)}">${liveText(Number.isFinite(quote?.change) ? money(quote.change) : "--")}</td>
+          <td class="${liveCls(quote?.changePct)} quote-cell">${liveText(Number.isFinite(quote?.changePct) ? withCellTime(pct(quote.changePct), quoteTimeText(quote), "实时") : "--")}</td>
+          <td class="${liveCls(quote?.change)} quote-cell">${liveText(Number.isFinite(quote?.change) ? withCellTime(money(quote.change), quoteTimeText(quote), "实时") : "--")}</td>
           <td>${renderSpark(item.secid, quote?.changePct)}</td>
           <td>${quote?.amount ? money(quote.amount / 100000000) + "亿" : "--"}</td>
         `;
@@ -3324,8 +3357,8 @@
           <td>${escapeHtml(item.group)}</td>
           <td>${escapeHtml(item.name)}</td>
           <td>${quote?.price ? `${money(quote.price)} <span class="muted">${escapeHtml(item.unit)}</span>` : "--"}</td>
-          <td class="${liveCls(quote?.changePct)}">${liveText(Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--")}</td>
-          <td class="${liveCls(quote?.change)}">${liveText(Number.isFinite(quote?.change) ? money(quote.change) : "--")}</td>
+          <td class="${liveCls(quote?.changePct)} quote-cell">${liveText(Number.isFinite(quote?.changePct) ? withCellTime(pct(quote.changePct), quoteTimeText(quote), "实时") : "--")}</td>
+          <td class="${liveCls(quote?.change)} quote-cell">${liveText(Number.isFinite(quote?.change) ? withCellTime(money(quote.change), quoteTimeText(quote), "实时") : "--")}</td>
           <td>${renderSpark(item.secid, quote?.changePct)}</td>
           <td>${quote?.amount ? money(quote.amount / 100000000) + "亿" : "--"}</td>
         `;
@@ -3342,10 +3375,10 @@
           <td>${escapeHtml(item.market)}</td>
           <td>${escapeHtml(item.name)}</td>
           <td>${quote?.price ? money(quote.price) : "--"}</td>
-          <td class="${liveCls(quote?.changePct)}">${liveText(Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--")}</td>
-          <td class="${liveCls(quote?.change)}">${liveText(Number.isFinite(quote?.change) ? money(quote.change) : "--")}</td>
+          <td class="${liveCls(quote?.changePct)} quote-cell">${liveText(Number.isFinite(quote?.changePct) ? withCellTime(pct(quote.changePct), quoteTimeText(quote), "实时") : "--")}</td>
+          <td class="${liveCls(quote?.change)} quote-cell">${liveText(Number.isFinite(quote?.change) ? withCellTime(money(quote.change), quoteTimeText(quote), "实时") : "--")}</td>
           <td>${Number.isFinite(quote?.extPrice) ? money(quote.extPrice) : "--"}</td>
-          <td class="${liveCls(quote?.extPct)}">${liveText(Number.isFinite(quote?.extPct) ? pct(quote.extPct) : "--")}</td>
+          <td class="${liveCls(quote?.extPct)} quote-cell wide">${liveText(Number.isFinite(quote?.extPct) ? withCellTime(pct(quote.extPct), quoteTimeText(quote), "盘前/盘后") : "--")}</td>
           <td>${renderSpark(item.secid, quote?.changePct)}</td>
           <td>${quote?.amount ? money(quote.amount / 100000000) + "亿" : "--"}</td>
         `;
@@ -3366,19 +3399,19 @@
         <td class="code">${escapeHtml(stock.symbol)}</td>
         <td>${escapeHtml(stock.name)}</td>
         <td>${stock.price ? money(stock.price) : "--"}</td>
-        <td class="${liveCls(stock.changePct)}">${liveText(Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--")}</td>
-        <td class="${liveCls(stock.change)}">${liveText(Number.isFinite(stock.change) ? money(stock.change) : "--")}</td>
+        <td class="${liveCls(stock.changePct)} quote-cell">${liveText(Number.isFinite(stock.changePct) ? withCellTime(pct(stock.changePct), quoteTimeText(stock), "实时") : "--")}</td>
+        <td class="${liveCls(stock.change)} quote-cell">${liveText(Number.isFinite(stock.change) ? withCellTime(money(stock.change), quoteTimeText(stock), "实时") : "--")}</td>
         <td>${Number.isFinite(stock.extPrice) ? money(stock.extPrice) : "--"}</td>
-        <td class="${liveCls(stock.extPct)}">${liveText(Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--")}</td>
+        <td class="${liveCls(stock.extPct)} quote-cell wide">${liveText(Number.isFinite(stock.extPct) ? withCellTime(pct(stock.extPct), quoteTimeText(stock), "盘前/盘后") : "--")}</td>
         <td>${renderSpark(stock.secid, stock.changePct)}</td>
         <td>${stock.amount ? money(stock.amount / 100000000) + "亿" : "--"}</td>
       ` : `
         <td class="code">${escapeHtml(stock.symbol)}</td>
         <td>${escapeHtml(stock.name)}</td>
         <td>${stock.price ? money(stock.price) : "--"}</td>
-        <td class="${liveCls(stock.changePct)}">${liveText(Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--")}</td>
+        <td class="${liveCls(stock.changePct)} quote-cell">${liveText(Number.isFinite(stock.changePct) ? withCellTime(pct(stock.changePct), quoteTimeText(stock), "实时") : "--")}</td>
         <td>${Number.isFinite(stock.extPrice) ? money(stock.extPrice) : "--"}</td>
-        <td class="${liveCls(stock.extPct)}">${liveText(Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--")}</td>
+        <td class="${liveCls(stock.extPct)} quote-cell wide">${liveText(Number.isFinite(stock.extPct) ? withCellTime(pct(stock.extPct), quoteTimeText(stock), "盘前/盘后") : "--")}</td>
         <td>${renderSpark(stock.secid, stock.changePct)}</td>
         <td><button class="mini">删除</button></td>
       `;
