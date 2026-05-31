@@ -765,6 +765,10 @@
           <h2>多信号源对比</h2>
           <div class="hint" id="signalTitle">选择一只基金后对比信号误差</div>
         </div>
+        <div class="toolbar" style="grid-template-columns:minmax(260px,1fr) auto;border-bottom:1px solid var(--line);">
+          <input id="thsEndpointInput" placeholder="同花顺备用接口模板，例如 https://127.0.0.1:8787/ths?code={code}">
+          <button class="mini" id="thsTestBtn">刷新同花顺源</button>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -779,7 +783,7 @@
             <tbody id="signalBody"></tbody>
           </table>
         </div>
-        <div class="notice">误差以“天天基金估算涨跌”为基准。持仓加权只覆盖披露的前十大持仓，QDII 存在汇率、现金仓位、期货和持仓滞后影响。</div>
+        <div class="notice">误差以“天天基金估算涨跌”为基准。同花顺备用源需要你后续提供已登录可访问或本地代理接口，返回 JSON；浏览器跨域、登录态和授权限制由该接口自行处理。</div>
       </section>
 
       <section>
@@ -1002,6 +1006,7 @@
       refreshSeconds: 1,
       alertPercent: 2,
       soundAlert: true,
+      thsEndpoint: "",
       selectedFund: "040046",
       stockWatch: ["AAPL", "MSFT", "NVDA", "TSLA"],
       funds: [
@@ -1058,6 +1063,7 @@
       config: loadConfig(),
       quotes: new Map(),
       latestOfficial: new Map(),
+      thsSignals: new Map(),
       holdings: new Map(),
       history: new Map(),
       tradeInfo: new Map(),
@@ -1129,6 +1135,8 @@
       historyBody: document.querySelector("#historyBody"),
       signalTitle: document.querySelector("#signalTitle"),
       signalBody: document.querySelector("#signalBody"),
+      thsEndpointInput: document.querySelector("#thsEndpointInput"),
+      thsTestBtn: document.querySelector("#thsTestBtn"),
       holdingBody: document.querySelector("#holdingBody"),
       holdingTitle: document.querySelector("#holdingTitle"),
       rebalanceTitle: document.querySelector("#rebalanceTitle"),
@@ -1905,6 +1913,38 @@
         : { code, error: data.error || "暂无正式净值" };
     }
 
+    function normalizeThsSignal(code, data) {
+      const body = data?.data || data?.result || data || {};
+      const value = Number(body.changePct ?? body.estimateChange ?? body.gszzl ?? body.zdf ?? body.rate);
+      const nav = toNumber(body.estimate ?? body.gsz ?? body.nav ?? body.value);
+      const time = body.time || body.estimateTime || body.gztime || body.date || "";
+      return {
+        code,
+        value,
+        nav,
+        time,
+        name: body.name || body.fundName || "",
+        source: body.source || "同花顺备用源",
+        raw: body,
+        error: Number.isFinite(value) ? "" : "接口返回中未找到 changePct/estimateChange/gszzl/zdf/rate"
+      };
+    }
+
+    async function fetchThsSignal(code) {
+      const template = String(state.config.thsEndpoint || "").trim();
+      if (!template) return { code, error: "未配置同花顺备用接口" };
+      const url = template.includes("{code}")
+        ? template.replaceAll("{code}", encodeURIComponent(code))
+        : `${template}${template.includes("?") ? "&" : "?"}code=${encodeURIComponent(code)}`;
+      try {
+        const response = await fetch(url, { credentials: "include", cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return normalizeThsSignal(code, await response.json());
+      } catch (error) {
+        return { code, error: error.message };
+      }
+    }
+
     function parseHistoryHtml(html) {
       const doc = new DOMParser().parseFromString(html, "text/html");
       return [...doc.querySelectorAll("tbody tr")].map(tr => {
@@ -2448,6 +2488,7 @@
           renderRebalance();
           refreshSelectedHistory();
           refreshSelectedHoldings();
+          refreshThsSignal();
         });
         els.fundBody.appendChild(row);
       }
@@ -2863,6 +2904,23 @@
           value: fundStock.changePct,
           meta: fundStock.price ? `现价 ${money(fundStock.price)}` : "--",
           note: "仅 ETF/LOF 等场内基金可用，含折溢价"
+        });
+      }
+
+      const ths = state.thsSignals.get(code);
+      if (state.config.thsEndpoint) {
+        rows.push({
+          name: "同花顺备用源",
+          value: Number(ths?.value),
+          meta: ths?.time || (ths?.error ? "接口异常" : "等待刷新"),
+          note: ths?.error || "来自你配置的同花顺/本地代理接口"
+        });
+      } else {
+        rows.push({
+          name: "同花顺备用源",
+          value: NaN,
+          meta: "未配置",
+          note: "填写上方接口模板后启用，支持登录态或本地代理"
         });
       }
 
@@ -3315,6 +3373,17 @@
       return tr;
     }
 
+    async function refreshThsSignal() {
+      const code = state.config.selectedFund;
+      if (!code || !state.config.thsEndpoint) {
+        renderSignals();
+        return;
+      }
+      const data = await fetchThsSignal(code);
+      state.thsSignals.set(code, data);
+      renderSignals();
+    }
+
     async function refreshNow() {
       if (state.refreshing) return;
       clearTimeout(state.timer);
@@ -3342,6 +3411,7 @@
       }
 
       if (deepRefreshDue) await refreshSelectedHistory(false);
+      if (deepRefreshDue) await refreshThsSignal();
 
       const holdingCodes = [];
       if (deepRefreshDue) {
@@ -3551,6 +3621,7 @@
       state.config.refreshSeconds = Math.max(1, Number(els.intervalInput.value) || 1);
       state.config.alertPercent = Math.max(0, Number(els.alertInput.value) || 0);
       state.config.soundAlert = els.soundInput.checked;
+      state.config.thsEndpoint = els.thsEndpointInput.value.trim();
       saveConfig();
     }
 
@@ -3585,6 +3656,14 @@
       els.intervalInput.addEventListener("change", saveSettings);
       els.alertInput.addEventListener("change", saveSettings);
       els.soundInput.addEventListener("change", saveSettings);
+      els.thsEndpointInput.addEventListener("change", () => {
+        saveSettings();
+        refreshThsSignal();
+      });
+      els.thsTestBtn.addEventListener("click", () => {
+        saveSettings();
+        refreshThsSignal();
+      });
       els.applyTradeBtn.addEventListener("click", applyTradeSync);
       els.clearTradeBtn.addEventListener("click", () => {
         const fund = state.config.funds.find(item => item.code === state.config.selectedFund);
@@ -3686,6 +3765,7 @@
       els.intervalInput.value = state.config.refreshSeconds;
       els.alertInput.value = state.config.alertPercent;
       els.soundInput.checked = state.config.soundAlert;
+      els.thsEndpointInput.value = state.config.thsEndpoint || "";
       els.tradeDate.value = todayInputValue();
       els.tradeTargetCode.disabled = els.tradeType.value !== "convert";
       bindEvents();
@@ -3703,6 +3783,7 @@
       renderOcrRows();
       refreshNow();
       refreshIndexHistory();
+      refreshThsSignal();
     }
 
     init();
