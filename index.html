@@ -166,6 +166,7 @@
       font-weight: 400;
       line-height: 1.2;
       font-variant-numeric: tabular-nums;
+      white-space: nowrap;
     }
     .refreshing-dot {
       display: inline-block;
@@ -469,7 +470,20 @@
       th, td { padding: 8px; }
     }
     .fund-wrap { max-height: 640px; }
-    .fund-wrap table { min-width: 1580px; }
+    .fund-wrap table {
+      min-width: 1980px;
+      table-layout: fixed;
+    }
+    .fund-wrap th:nth-child(1), .fund-wrap td:nth-child(1) { width: 56px; }
+    .fund-wrap th:nth-child(2), .fund-wrap td:nth-child(2) { width: 88px; }
+    .fund-wrap th:nth-child(3), .fund-wrap td:nth-child(3) { width: 270px; }
+    .fund-wrap th:nth-child(4), .fund-wrap td:nth-child(4) { width: 150px; }
+    .fund-wrap th:nth-child(5), .fund-wrap td:nth-child(5),
+    .fund-wrap th:nth-child(6), .fund-wrap td:nth-child(6),
+    .fund-wrap th:nth-child(7), .fund-wrap td:nth-child(7) { width: 150px; }
+    .fund-wrap th:nth-child(8), .fund-wrap td:nth-child(8) { width: 230px; }
+    .fund-wrap th:nth-child(9), .fund-wrap td:nth-child(9) { width: 170px; }
+    .fund-wrap th:nth-child(10), .fund-wrap td:nth-child(10) { width: 160px; }
     .trade-sync {
       border-top: 1px solid var(--line);
       padding: 12px;
