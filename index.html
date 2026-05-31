@@ -116,7 +116,7 @@
     th, td {
       padding: 9px 10px;
       border-bottom: 1px solid var(--line);
-      text-align: left;
+      text-align: center;
       white-space: nowrap;
       font-size: 13px;
       vertical-align: middle;
@@ -144,6 +144,7 @@
       max-width: 250px;
       overflow: hidden;
       text-overflow: ellipsis;
+      text-align: left;
     }
     .up { color: var(--up); font-weight: 650; }
     .down { color: var(--down); font-weight: 650; }
@@ -176,15 +177,19 @@
       50% { opacity: 1; }
     }
     .spark {
-      width: 118px;
+      width: 132px;
       height: 34px;
       display: block;
+      margin: 0 auto;
     }
     .spark path {
       fill: none;
       stroke: var(--accent);
       stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
       vector-effect: non-scaling-stroke;
+      animation: drawTrend .45s ease;
     }
     .spark circle {
       fill: var(--accent);
@@ -196,6 +201,41 @@
     .spark text {
       fill: var(--muted);
       font-size: 10px;
+    }
+    .fund-trend {
+      width: 180px;
+      height: 48px;
+      display: block;
+      margin: 0 auto;
+    }
+    .fund-trend path.grid {
+      stroke: #e4e8f0;
+      stroke-width: 1;
+    }
+    .fund-trend path.line {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+      animation: drawTrend .55s ease;
+    }
+    .fund-trend circle {
+      fill: var(--accent);
+      stroke: #fff;
+      stroke-width: 2;
+      filter: drop-shadow(0 1px 2px rgba(25, 87, 210, .25));
+    }
+    .fund-trend.up path.line, .fund-trend.up circle { stroke: var(--up); fill: var(--up); }
+    .fund-trend.down path.line, .fund-trend.down circle { stroke: var(--down); fill: var(--down); }
+    .fund-trend text {
+      fill: var(--muted);
+      font-size: 11px;
+    }
+    @keyframes drawTrend {
+      from { stroke-dasharray: 260; stroke-dashoffset: 80; opacity: .55; }
+      to { stroke-dasharray: 260; stroke-dashoffset: 0; opacity: 1; }
     }
     .warn { color: var(--warn); }
     .muted { color: var(--muted); }
@@ -420,6 +460,7 @@
       th, td { padding: 8px; }
     }
     .fund-wrap { max-height: 640px; }
+    .fund-wrap table { min-width: 1580px; }
   </style>
 </head>
 <body>
@@ -527,7 +568,10 @@
                 <th>代码</th>
                 <th>名称/备注</th>
                 <th>估算净值</th>
-                <th>估算涨跌</th>
+                <th>盘前涨跌</th>
+                <th>盘中实盘</th>
+                <th>盘后估值</th>
+                <th>当日曲线</th>
                 <th>估算时间</th>
                 <th>最新净值</th>
                 <th>申购状态</th>
@@ -856,6 +900,7 @@
       indices: new Map(),
       resources: new Map(),
       intraday: new Map(),
+      fundIntraday: new Map(),
       indexHistory: new Map(),
       selectedIndex: "100.NDX",
       stocks: new Map(),
@@ -1848,6 +1893,104 @@
       return `<svg class="spark ${cls(pctValue)}" viewBox="0 0 ${w} ${h}" role="img"><path d="${d}"></path><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3"></circle></svg>`;
     }
 
+    function minutesInZone(timeZone) {
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      }).formatToParts(new Date());
+      const hour = Number(parts.find(part => part.type === "hour")?.value || 0);
+      const minute = Number(parts.find(part => part.type === "minute")?.value || 0);
+      return hour * 60 + minute;
+    }
+
+    function inRanges(minute, ranges) {
+      return ranges.some(([start, end]) => minute >= start && minute <= end);
+    }
+
+    function inferFundMarket(fund, quote = {}) {
+      const text = `${fund.code || ""} ${fund.alias || ""} ${quote.name || ""}`.toUpperCase();
+      if (/纳斯达克|NASDAQ|纳指|标普|S&P|道琼|美股|美元|全球精选|海外|QDII/.test(text)) return "US";
+      if (/恒生|港股|香港|H股|中概|互联|互联网/.test(text)) return "HK";
+      if (/日经|日本/.test(text)) return "JP";
+      if (/韩国|韩股/.test(text)) return "KR";
+      if (/台湾|台股/.test(text)) return "TW";
+      return "CN";
+    }
+
+    function marketSession(market) {
+      if (market === "US") {
+        const m = minutesInZone("America/New_York");
+        if (m >= 240 && m < 570) return { stage: "pre", label: "美股盘前" };
+        if (m >= 570 && m <= 960) return { stage: "regular", label: "美股盘中" };
+        if (m > 960 && m <= 1200) return { stage: "post", label: "美股盘后" };
+        return { stage: "closed", label: "美股休市" };
+      }
+      const m = minutesInZone("Asia/Shanghai");
+      const ranges = {
+        CN: [[570, 690], [780, 900]],
+        HK: [[570, 720], [780, 960]],
+        JP: [[480, 630], [690, 840]],
+        KR: [[480, 870]],
+        TW: [[540, 810]]
+      };
+      const labels = { CN: "A股盘中", HK: "港股盘中", JP: "日股盘中", KR: "韩股盘中", TW: "台股盘中" };
+      return inRanges(m, ranges[market] || ranges.CN) ? { stage: "regular", label: labels[market] || "盘中" } : { stage: "closed", label: `${labels[market] || "市场"}休市` };
+    }
+
+    function updateFundIntraday(fund, quote) {
+      const change = Number(quote?.estimateChange);
+      if (!Number.isFinite(change)) return;
+      const market = inferFundMarket(fund, quote);
+      const session = marketSession(market);
+      const existing = state.fundIntraday.get(fund.code) || { rows: [], market, session: session.stage, latest: {} };
+      existing.market = market;
+      existing.session = session.stage;
+      existing.label = session.label;
+      if (session.stage === "pre") existing.latest.pre = change;
+      if (session.stage === "regular") existing.latest.regular = change;
+      if (session.stage === "post") existing.latest.post = change;
+      if (session.stage === "closed" && !Number.isFinite(existing.latest.post)) existing.latest.post = change;
+      if (session.stage !== "closed") {
+        const minuteKey = Math.floor(Date.now() / 60000);
+        const last = existing.rows.at(-1);
+        const point = { t: Date.now(), minuteKey, value: change, stage: session.stage };
+        if (last?.minuteKey === minuteKey) existing.rows[existing.rows.length - 1] = point;
+        else existing.rows.push(point);
+        existing.rows = existing.rows.slice(-260);
+      }
+      state.fundIntraday.set(fund.code, existing);
+    }
+
+    function fundStageValue(code, stage) {
+      const value = state.fundIntraday.get(code)?.latest?.[stage];
+      return Number.isFinite(value) ? value : NaN;
+    }
+
+    function renderFundTrend(code, fallbackPct = NaN) {
+      const data = state.fundIntraday.get(code);
+      const rows = data?.rows || [];
+      if (rows.length < 2) {
+        const value = Number.isFinite(fallbackPct) ? pct(fallbackPct) : (data?.label || "等待交易");
+        return `<svg class="fund-trend" viewBox="0 0 180 48" role="img"><path class="grid" d="M8 24H172"></path><text x="52" y="29">${escapeHtml(value)}</text></svg>`;
+      }
+      const values = rows.map(row => row.value).filter(Number.isFinite);
+      const min = Math.min(...values, 0);
+      const max = Math.max(...values, 0);
+      const span = max - min || 1;
+      const w = 180, h = 48, padX = 8, padY = 7;
+      const points = rows.map((row, index) => {
+        const x = padX + (w - padX * 2) * index / (rows.length - 1);
+        const y = padY + (h - padY * 2) - (row.value - min) / span * (h - padY * 2);
+        return [x, y];
+      });
+      const d = points.map(([x, y], index) => `${index ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+      const [lx, ly] = points.at(-1);
+      const latest = rows.at(-1)?.value;
+      return `<svg class="fund-trend ${cls(latest)}" viewBox="0 0 ${w} ${h}" role="img"><path class="grid" d="M${padX} ${h / 2}H${w - padX}"></path><path class="line" d="${d}"></path><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="4"></circle></svg>`;
+    }
+
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     }
@@ -1875,6 +2018,10 @@
         const profitRate = cost + fee > 0 ? profit / (cost + fee) * 100 : NaN;
         totalCost += cost + fee;
         totalValue += value;
+        const currentEstimateChange = Number.isFinite(quote.estimateChange) ? quote.estimateChange : NaN;
+        const preChange = fundStageValue(fund.code, "pre");
+        const regularChange = fundStageValue(fund.code, "regular");
+        const postChange = fundStageValue(fund.code, "post");
 
         const selected = state.config.selectedFund === fund.code;
         const row = document.createElement("tr");
@@ -1884,7 +2031,10 @@
           <td class="code">${fund.code}</td>
           <td class="name" title="${escapeHtml(quote.name || fund.alias)}">${escapeHtml(quote.name || fund.alias || "")}</td>
           <td>${nav ? money(nav) : "--"}</td>
-          <td class="${liveCls(quote.estimateChange)}">${liveText(Number.isFinite(quote.estimateChange) ? pct(quote.estimateChange) : "--")}</td>
+          <td class="${liveCls(preChange)}">${liveText(Number.isFinite(preChange) ? pct(preChange) : "--")}</td>
+          <td class="${liveCls(regularChange)}">${liveText(Number.isFinite(regularChange) ? pct(regularChange) : "--")}</td>
+          <td class="${liveCls(postChange)}">${liveText(Number.isFinite(postChange) ? pct(postChange) : "--")}</td>
+          <td>${renderFundTrend(fund.code, currentEstimateChange)}</td>
           <td>${escapeHtml(quote.estimateTime || "")}</td>
           <td>${quote.nav ? money(quote.nav) : "--"} <span class="muted">${escapeHtml(quote.navDate || "")}</span></td>
           <td>${escapeHtml(buyStatus || "--")}</td>
@@ -2487,6 +2637,7 @@
       for (const fund of state.config.funds) {
         const quote = await fetchFundQuote(fund.code);
         state.quotes.set(fund.code, quote);
+        updateFundIntraday(fund, quote);
         if (deepRefreshDue) {
           const trade = await fetchFundTradeInfo(fund.code);
           state.tradeInfo.set(fund.code, trade);
