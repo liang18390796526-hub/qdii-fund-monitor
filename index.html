@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
@@ -148,20 +148,15 @@
     .up { color: var(--up); font-weight: 650; }
     .down { color: var(--down); font-weight: 650; }
     .live-cell {
-      position: relative;
-      animation: livePulse .65s ease;
+      font-variant-numeric: tabular-nums;
     }
-    .live-cell::after {
-      content: "";
-      position: absolute;
-      inset: 3px 5px;
-      border-radius: 5px;
-      pointer-events: none;
-      opacity: 0;
-      animation: liveGlow .65s ease;
+    .live-num {
+      display: inline-block;
+      min-width: max-content;
+      font-variant-numeric: tabular-nums;
+      animation: liveNumberFade .5s ease;
+      will-change: opacity, filter;
     }
-    .up.live-cell::after { background: rgba(198, 40, 40, .12); }
-    .down.live-cell::after { background: rgba(11, 128, 67, .12); }
     .refreshing-dot {
       display: inline-block;
       width: 7px;
@@ -172,15 +167,9 @@
       animation: blinkDot .8s infinite ease-in-out;
       vertical-align: 1px;
     }
-    @keyframes livePulse {
-      0% { transform: scale(1); }
-      35% { transform: scale(1.045); }
-      100% { transform: scale(1); }
-    }
-    @keyframes liveGlow {
-      0% { opacity: 0; transform: scale(.96); }
-      35% { opacity: 1; transform: scale(1); }
-      100% { opacity: 0; transform: scale(1.04); }
+    @keyframes liveNumberFade {
+      0% { opacity: .45; filter: brightness(1.35); }
+      100% { opacity: 1; filter: brightness(1); }
     }
     @keyframes blinkDot {
       0%, 100% { opacity: .25; }
@@ -1780,6 +1769,10 @@
       return base ? `${base} live-cell` : "live-cell";
     }
 
+    function liveText(text) {
+      return `<span class="live-num">${text}</span>`;
+    }
+
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     }
@@ -1816,7 +1809,7 @@
           <td class="code">${fund.code}</td>
           <td class="name" title="${escapeHtml(quote.name || fund.alias)}">${escapeHtml(quote.name || fund.alias || "")}</td>
           <td>${nav ? money(nav) : "--"}</td>
-          <td class="${liveCls(quote.estimateChange)}">${Number.isFinite(quote.estimateChange) ? pct(quote.estimateChange) : "--"}</td>
+          <td class="${liveCls(quote.estimateChange)}">${liveText(Number.isFinite(quote.estimateChange) ? pct(quote.estimateChange) : "--")}</td>
           <td>${escapeHtml(quote.estimateTime || "")}</td>
           <td>${quote.nav ? money(quote.nav) : "--"} <span class="muted">${escapeHtml(quote.navDate || "")}</span></td>
           <td>${escapeHtml(buyStatus || "--")}</td>
@@ -1825,8 +1818,8 @@
           <td><input data-edit="${fund.code}" data-field="cost" type="number" min="0" step="0.01" value="${fund.cost || ""}"></td>
           <td><input data-edit="${fund.code}" data-field="fee" type="number" min="0" step="0.01" value="${fund.fee || ""}"></td>
           <td>${value ? money(value) : "--"}</td>
-          <td class="${liveCls(profit)}">${value ? money(profit) : "--"}</td>
-          <td class="${liveCls(profitRate)}">${Number.isFinite(profitRate) ? pct(profitRate) : "--"}</td>
+          <td class="${liveCls(profit)}">${liveText(value ? money(profit) : "--")}</td>
+          <td class="${liveCls(profitRate)}">${liveText(Number.isFinite(profitRate) ? pct(profitRate) : "--")}</td>
           <td class="${quote.error ? "warn" : "muted"}">${escapeHtml(quote.error || "正常")}</td>
         `;
         row.addEventListener("click", event => {
@@ -1874,7 +1867,7 @@
           <td>${escapeHtml(row.shares)}</td>
           <td>${escapeHtml(row.value)}</td>
           <td>${stock?.price ? money(stock.price) : "--"}</td>
-          <td class="${liveCls(stock?.changePct)}">${Number.isFinite(stock?.changePct) ? pct(stock.changePct) : "--"}</td>
+          <td class="${liveCls(stock?.changePct)}">${liveText(Number.isFinite(stock?.changePct) ? pct(stock.changePct) : "--")}</td>
         `;
         els.holdingBody.appendChild(tr);
       }
@@ -2343,8 +2336,8 @@
           <td>${escapeHtml(item.group)}</td>
           <td>${escapeHtml(item.name)}</td>
           <td>${quote?.price ? `${money(quote.price)} <span class="muted">${escapeHtml(item.unit)}</span>` : "--"}</td>
-          <td class="${liveCls(quote?.changePct)}">${Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--"}</td>
-          <td class="${liveCls(quote?.change)}">${Number.isFinite(quote?.change) ? money(quote.change) : "--"}</td>
+          <td class="${liveCls(quote?.changePct)}">${liveText(Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--")}</td>
+          <td class="${liveCls(quote?.change)}">${liveText(Number.isFinite(quote?.change) ? money(quote.change) : "--")}</td>
           <td>${quote?.amount ? money(quote.amount / 100000000) + "亿" : "--"}</td>
         `;
         els.resourceBody.appendChild(tr);
@@ -2360,8 +2353,8 @@
           <td>${escapeHtml(item.market)}</td>
           <td>${escapeHtml(item.name)}</td>
           <td>${quote?.price ? money(quote.price) : "--"}</td>
-          <td class="${liveCls(quote?.changePct)}">${Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--"}</td>
-          <td class="${liveCls(quote?.change)}">${Number.isFinite(quote?.change) ? money(quote.change) : "--"}</td>
+          <td class="${liveCls(quote?.changePct)}">${liveText(Number.isFinite(quote?.changePct) ? pct(quote.changePct) : "--")}</td>
+          <td class="${liveCls(quote?.change)}">${liveText(Number.isFinite(quote?.change) ? money(quote.change) : "--")}</td>
           <td>${quote?.amount ? money(quote.amount / 100000000) + "亿" : "--"}</td>
         `;
         if (item.secid === state.selectedIndex) tr.classList.add("selected");
@@ -2381,18 +2374,18 @@
         <td class="code">${escapeHtml(stock.symbol)}</td>
         <td>${escapeHtml(stock.name)}</td>
         <td>${stock.price ? money(stock.price) : "--"}</td>
-        <td class="${liveCls(stock.changePct)}">${Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--"}</td>
-        <td class="${liveCls(stock.change)}">${Number.isFinite(stock.change) ? money(stock.change) : "--"}</td>
+        <td class="${liveCls(stock.changePct)}">${liveText(Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--")}</td>
+        <td class="${liveCls(stock.change)}">${liveText(Number.isFinite(stock.change) ? money(stock.change) : "--")}</td>
         <td>${Number.isFinite(stock.extPrice) ? money(stock.extPrice) : "--"}</td>
-        <td class="${liveCls(stock.extPct)}">${Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--"}</td>
+        <td class="${liveCls(stock.extPct)}">${liveText(Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--")}</td>
         <td>${stock.amount ? money(stock.amount / 100000000) + "亿" : "--"}</td>
       ` : `
         <td class="code">${escapeHtml(stock.symbol)}</td>
         <td>${escapeHtml(stock.name)}</td>
         <td>${stock.price ? money(stock.price) : "--"}</td>
-        <td class="${liveCls(stock.changePct)}">${Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--"}</td>
+        <td class="${liveCls(stock.changePct)}">${liveText(Number.isFinite(stock.changePct) ? pct(stock.changePct) : "--")}</td>
         <td>${Number.isFinite(stock.extPrice) ? money(stock.extPrice) : "--"}</td>
-        <td class="${liveCls(stock.extPct)}">${Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--"}</td>
+        <td class="${liveCls(stock.extPct)}">${liveText(Number.isFinite(stock.extPct) ? pct(stock.extPct) : "--")}</td>
         <td><button class="mini">删除</button></td>
       `;
       return tr;
@@ -2743,3 +2736,4 @@
   </script>
 </body>
 </html>
+
