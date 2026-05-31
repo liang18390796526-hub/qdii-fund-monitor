@@ -1006,7 +1006,7 @@
       refreshSeconds: 1,
       alertPercent: 2,
       soundAlert: true,
-      thsEndpoint: "",
+      thsEndpoint: "http://127.0.0.1:8787/ths?code={code}",
       selectedFund: "040046",
       stockWatch: ["AAPL", "MSFT", "NVDA", "TSLA"],
       funds: [
@@ -1915,7 +1915,7 @@
 
     function normalizeThsSignal(code, data) {
       const body = data?.data || data?.result || data || {};
-      const value = Number(body.changePct ?? body.estimateChange ?? body.gszzl ?? body.zdf ?? body.rate);
+      const value = Number(body.changePct ?? body.estimateChange ?? body.gszzl ?? body.zdf ?? body.rate ?? body.value);
       const nav = toNumber(body.estimate ?? body.gsz ?? body.nav ?? body.value);
       const time = body.time || body.estimateTime || body.gztime || body.date || "";
       return {
@@ -1926,7 +1926,7 @@
         name: body.name || body.fundName || "",
         source: body.source || "同花顺备用源",
         raw: body,
-        error: Number.isFinite(value) ? "" : "接口返回中未找到 changePct/estimateChange/gszzl/zdf/rate"
+        error: body.error || (Number.isFinite(value) ? "" : "接口返回中未找到 changePct/estimateChange/gszzl/zdf/rate/value")
       };
     }
 
@@ -2920,10 +2920,11 @@
 
       const ths = state.thsSignals.get(code);
       if (state.config.thsEndpoint) {
+        const thsConnected = ths?.error && /本机代理已连接/.test(ths.error);
         rows.push({
           name: "同花顺备用源",
           value: Number(ths?.value),
-          meta: ths?.time || (ths?.error ? "接口异常" : "等待刷新"),
+          meta: ths?.time || (thsConnected ? "代理已连接" : ths?.error ? "接口异常" : "等待刷新"),
           note: ths?.error || "来自你配置的同花顺/本地代理接口"
         });
       } else {
