@@ -1034,6 +1034,7 @@
     const state = {
       config: loadConfig(),
       quotes: new Map(),
+      latestOfficial: new Map(),
       holdings: new Map(),
       history: new Map(),
       tradeInfo: new Map(),
@@ -1873,6 +1874,14 @@
       return { code, rows: [], total: 0, error: "暂无历史净值" };
     }
 
+    async function fetchLatestOfficialNav(code) {
+      const data = await fetchHistory(code, 2);
+      const latest = data.rows?.[0] || null;
+      return latest
+        ? { code, ...latest, error: "" }
+        : { code, error: data.error || "暂无正式净值" };
+    }
+
     function parseHistoryHtml(html) {
       const doc = new DOMParser().parseFromString(html, "text/html");
       return [...doc.querySelectorAll("tbody tr")].map(tr => {
@@ -2181,6 +2190,23 @@
       return Number(`${match[1]}${String(match[2]).padStart(2, "0")}${String(match[3]).padStart(2, "0")}`);
     }
 
+    function latestOfficialForFund(code, latestHistory = null) {
+      const official = state.latestOfficial.get(code);
+      if (official && !official.error && official.date) return official;
+      return latestHistory || null;
+    }
+
+    function officialPostChange(fund, quote, latestHistory = null) {
+      const official = latestOfficialForFund(fund.code, latestHistory);
+      if (!official || !Number.isFinite(official.changePct)) return NaN;
+      const officialDate = compactDate(official.date);
+      const quoteNavDate = compactDate(quote?.navDate);
+      const estimateDate = compactDate(quote?.estimateTime);
+      if (estimateDate && officialDate >= estimateDate) return official.changePct;
+      if (quoteNavDate && officialDate > quoteNavDate) return official.changePct;
+      return NaN;
+    }
+
     function classifyFundEstimateStage(fund, quote, session = marketSession(inferFundMarket(fund, quote))) {
       const market = inferFundMarket(fund, quote);
       const parts = estimateTimeParts(quote?.estimateTime);
@@ -2296,6 +2322,7 @@
         const trade = state.tradeInfo.get(fund.code) || {};
         const histKey = [...state.history.keys()].find(key => key.startsWith(`${fund.code}:`));
         const latestHistory = histKey ? state.history.get(histKey)?.rows?.[0] : null;
+        const latestOfficial = latestOfficialForFund(fund.code, latestHistory);
         const buyStatus = latestHistory?.buyStatus || trade.buyStatus || "";
         const nav = quote.estimate || quote.nav || 0;
         const shares = Number(fund.shares) || 0;
@@ -2315,13 +2342,13 @@
         const dataStage = estimateDataStage(fund, quote);
         const preChange = calcFundPreSignal(fund, quote);
         const regularChange = stage === "regular" && dataStage !== "post" ? currentEstimateChange : NaN;
-        const officialChange = latestHistory && compactDate(latestHistory.date) >= compactDate(quote.estimateTime)
-          ? latestHistory.changePct
-          : NaN;
+        const officialChange = officialPostChange(fund, quote, latestHistory);
         const postChange = Number.isFinite(officialChange)
           ? officialChange
           : (stage === "post" || dataStage === "post" ? currentEstimateChange : NaN);
         const postLabel = Number.isFinite(officialChange) ? "实际" : "";
+        const latestNav = latestOfficial?.nav || quote.nav;
+        const latestNavDate = latestOfficial?.date || quote.navDate || "";
 
         const selected = state.config.selectedFund === fund.code;
         const row = document.createElement("tr");
@@ -2336,7 +2363,7 @@
           <td class="${liveCls(postChange)}">${liveText(Number.isFinite(postChange) ? `${pct(postChange)}${postLabel ? ` <span class="muted">${postLabel}</span>` : ""}` : "--")}</td>
           <td>${renderFundTrend(fund.code, currentEstimateChange)}</td>
           <td>${escapeHtml(quote.estimateTime || "")}</td>
-          <td>${quote.nav ? money(quote.nav) : "--"} <span class="muted">${escapeHtml(quote.navDate || "")}</span></td>
+          <td>${latestNav ? money(latestNav) : "--"} <span class="muted">${escapeHtml(latestNavDate)}</span></td>
           <td>${escapeHtml(buyStatus || "--")}</td>
           <td>${renderTradeLimitCell(fund.code, trade)}</td>
           <td><input data-edit="${fund.code}" data-field="shares" type="number" min="0" step="0.01" value="${fund.shares || ""}"></td>
@@ -3245,6 +3272,8 @@
         if (deepRefreshDue) {
           const trade = await fetchFundTradeInfo(fund.code);
           state.tradeInfo.set(fund.code, trade);
+          const official = await fetchLatestOfficialNav(fund.code);
+          state.latestOfficial.set(fund.code, official);
         }
         if (!quote.error && Math.abs(quote.estimateChange) >= state.config.alertPercent) alerts.push(quote);
         renderFunds();
