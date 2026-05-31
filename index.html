@@ -430,6 +430,8 @@
             <div class="ocr-actions">
               <button class="mini" id="ocrRunBtn">识别截图</button>
               <button class="mini" id="ocrParseBtn">解析文字</button>
+              <button class="mini" id="ocrAddRowBtn">新增手动行</button>
+              <button class="mini" id="ocrResolveBtn">按名称补代码</button>
               <button class="mini primary" id="ocrImportBtn">导入关注列表</button>
             </div>
           </div>
@@ -447,12 +449,13 @@
                 <th>收益率</th>
                 <th>持仓日期</th>
                 <th>置信度</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody id="ocrBody"></tbody>
           </table>
         </div>
-        <div class="notice">OCR 会受截图清晰度、字体和遮挡影响。导入前请核对识别结果；持有金额会作为总成本的参考值，份额会写入关注基金。</div>
+        <div class="notice">OCR 会受截图清晰度、字体和遮挡影响。导入前请核对识别结果；如果截图没有基金代码，可以手动填 6 位代码，或用“导入到当前基金”把金额/份额写入当前选中的基金。</div>
       </section>
 
       <section>
@@ -818,6 +821,8 @@
       ocrProgress: document.querySelector("#ocrProgress"),
       ocrRunBtn: document.querySelector("#ocrRunBtn"),
       ocrParseBtn: document.querySelector("#ocrParseBtn"),
+      ocrAddRowBtn: document.querySelector("#ocrAddRowBtn"),
+      ocrResolveBtn: document.querySelector("#ocrResolveBtn"),
       ocrImportBtn: document.querySelector("#ocrImportBtn"),
       ocrBody: document.querySelector("#ocrBody"),
       fundBody: document.querySelector("#fundBody"),
@@ -910,6 +915,17 @@
       return "未知平台";
     }
 
+    function guessOcrAmount(text, usedValues = []) {
+      const nums = [...String(text || "").matchAll(/[-+]?¥?\s*\d[\d,，]*(?:\.\d+)?\s*(?:元)?/g)]
+        .map(match => parseOcrNumber(match[0]))
+        .filter(num => Number.isFinite(num) && num > 0 && !usedValues.includes(num));
+      return nums.length ? Math.max(...nums) : 0;
+    }
+
+    function blankOcrRow(platform = "未知平台") {
+      return { code: "", name: "", platform, shares: 0, amount: 0, profit: 0, profitRate: 0, date: "", confidence: 0 };
+    }
+
     function parseHoldingScreenshotText(rawText) {
       const text = normalizeOcrText(rawText);
       const lines = text.split("\n").map(line => line.trim()).filter(Boolean);
@@ -918,9 +934,10 @@
       const date = findNearText(lines, ["持有日期", "持仓日期", "确认日期", "买入日期", "交易日"], /(20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2})/) ||
         (text.match(/20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}/)?.[0] || "");
       const shares = findNearNumber(lines, ["持有份额", "持仓份额", "份额", "持有数量", "持仓数量"]);
-      const amount = findNearNumber(lines, ["持有金额", "持仓金额", "持有市值", "资产", "金额"]);
+      let amount = findNearNumber(lines, ["持有金额", "持仓金额", "持有市值", "资产", "金额"]);
       const profit = findNearNumber(lines, ["持有收益", "累计收益", "收益", "盈亏"]);
       const profitRate = findNearNumber(lines, ["收益率", "持有收益率", "盈亏率"]);
+      if (!amount) amount = guessOcrAmount(text, [shares, profit, profitRate].filter(Boolean));
       const rows = (codes.length ? codes : [""]).map(code => {
         const codeIndex = code ? text.indexOf(code) : -1;
         const before = codeIndex >= 0 ? text.slice(Math.max(0, codeIndex - 45), codeIndex) : lines.slice(0, 4).join(" ");
@@ -930,13 +947,14 @@
         const confidence = [code, shares, amount, profit || profitRate, date].filter(Boolean).length;
         return { code, name, platform, shares, amount, profit, profitRate, date, confidence };
       });
+      if (!rows.length) rows.push(blankOcrRow(platform));
       return rows;
     }
 
     function renderOcrRows() {
       els.ocrBody.innerHTML = "";
       if (!state.ocrRows.length) {
-        els.ocrBody.innerHTML = `<tr><td colspan="9" class="muted">上传截图或粘贴文字后，点击解析</td></tr>`;
+        els.ocrBody.innerHTML = `<tr><td colspan="10" class="muted">上传截图或粘贴文字后，点击解析；也可以点“新增手动行”直接录入</td></tr>`;
         return;
       }
       state.ocrRows.forEach((row, index) => {
@@ -951,9 +969,61 @@
           <td><input data-ocr="${index}" data-field="profitRate" type="number" step="0.01" value="${row.profitRate || ""}"></td>
           <td><input data-ocr="${index}" data-field="date" value="${escapeHtml(row.date || "")}"></td>
           <td>${row.confidence || 0}/5</td>
+          <td><button class="mini" data-ocr-action="current" data-index="${index}">导入到当前基金</button></td>
         `;
         els.ocrBody.appendChild(tr);
       });
+    }
+
+    function addManualOcrRow() {
+      state.ocrRows.push(blankOcrRow(detectOcrPlatform(els.ocrText.value)));
+      renderOcrRows();
+    }
+
+    async function resolveOcrCodesByName() {
+      let resolved = 0;
+      els.ocrResolveBtn.disabled = true;
+      try {
+        for (const row of state.ocrRows) {
+          if (/^\d{6}$/.test(String(row.code || ""))) continue;
+          const keyword = (row.name || "").trim();
+          if (!keyword) continue;
+          const matches = await fetchFundSearch(keyword);
+          const fund = matches.find(item => item.CATEGORY === 700 && /^\d{6}$/.test(item.CODE));
+          if (fund) {
+            row.code = fund.CODE;
+            row.name = fund.NAME || row.name;
+            row.confidence = Math.max(row.confidence || 0, 3);
+            resolved += 1;
+          }
+        }
+        renderOcrRows();
+        alert(resolved ? `已补全 ${resolved} 条基金代码` : "没有按名称匹配到基金代码，请手动填写 6 位代码");
+      } catch (error) {
+        alert(`补代码失败：${error.message || error}`);
+      } finally {
+        els.ocrResolveBtn.disabled = false;
+      }
+    }
+
+    function applyOcrRowToFund(row, fund) {
+      fund.alias = row.name || fund.alias;
+      if (row.shares) fund.shares = row.shares;
+      if (row.amount) fund.cost = row.amount;
+      fund.source = row.platform || fund.source;
+      fund.holdingDate = row.date || fund.holdingDate;
+      fund.ocrProfit = row.profit || fund.ocrProfit;
+      fund.ocrProfitRate = row.profitRate || fund.ocrProfitRate;
+    }
+
+    function importOcrRowToCurrent(index) {
+      const row = state.ocrRows[index];
+      const fund = state.config.funds.find(item => item.code === state.config.selectedFund);
+      if (!row || !fund) return alert("请先在关注基金列表中选中一只基金");
+      applyOcrRowToFund(row, fund);
+      saveConfig();
+      renderFunds();
+      alert(`已导入到当前基金：${fund.code} ${fund.alias || ""}`);
     }
 
     async function runScreenshotOcr() {
@@ -996,11 +1066,7 @@
       for (const row of rows) {
         const existing = state.config.funds.find(fund => fund.code === row.code);
         const target = existing || { code: row.code, alias: row.name || row.code, shares: 0, cost: 0, fee: 0 };
-        target.alias = row.name || target.alias;
-        if (row.shares) target.shares = row.shares;
-        if (row.amount) target.cost = row.amount;
-        target.source = row.platform || target.source;
-        target.holdingDate = row.date || target.holdingDate;
+        applyOcrRowToFund(row, target);
         if (!existing) state.config.funds.push(target);
       }
       state.config.selectedFund = rows[0].code;
@@ -2199,7 +2265,14 @@
       });
       els.ocrRunBtn.addEventListener("click", runScreenshotOcr);
       els.ocrParseBtn.addEventListener("click", parseOcrTextInput);
+      els.ocrAddRowBtn.addEventListener("click", addManualOcrRow);
+      els.ocrResolveBtn.addEventListener("click", resolveOcrCodesByName);
       els.ocrImportBtn.addEventListener("click", importOcrRows);
+      els.ocrBody.addEventListener("click", event => {
+        const button = event.target.closest("[data-ocr-action]");
+        if (!button) return;
+        if (button.dataset.ocrAction === "current") importOcrRowToCurrent(Number(button.dataset.index));
+      });
       els.ocrBody.addEventListener("change", event => {
         const target = event.target;
         if (!target.matches("[data-ocr]")) return;
