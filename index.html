@@ -44,37 +44,9 @@
       text-align: right;
       line-height: 1.5;
     }
-    .toast {
-      position: fixed;
-      right: 18px;
-      top: 82px;
-      z-index: 20;
-      max-width: min(420px, calc(100vw - 36px));
-      padding: 11px 13px;
-      border: 1px solid var(--line);
-      border-left: 4px solid var(--accent);
-      border-radius: 8px;
-      background: rgba(255, 255, 255, .97);
-      box-shadow: 0 12px 30px rgba(17, 24, 39, .16);
-      color: var(--text);
-      font-size: 13px;
-      line-height: 1.45;
-      opacity: 0;
-      transform: translateY(-8px);
-      pointer-events: none;
-      transition: opacity .2s ease, transform .2s ease;
-    }
-    .toast.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    .toast strong {
-      display: block;
-      margin-bottom: 3px;
-    }
     .toolbar {
       display: grid;
-      grid-template-columns: minmax(280px, 1fr) auto auto auto auto;
+      grid-template-columns: minmax(280px, 1fr) auto auto auto;
       gap: 10px;
       align-items: center;
       padding: 12px 18px;
@@ -561,14 +533,12 @@
     <h1>QDII 基金实时监测</h1>
     <div class="status" id="status">准备刷新</div>
   </header>
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <div class="toolbar search-panel">
     <input id="searchInput" placeholder="输入基金名称或代码搜索，如 纳指、040046">
     <button class="primary" id="searchBtn">搜索基金</button>
     <button id="refreshBtn">立即刷新</button>
     <label class="tools">间隔(秒)<input id="intervalInput" type="number" min="1" step="1"></label>
-    <label class="tools">提醒(%)<input id="alertInput" type="number" min="0" step="0.1"></label>
     <div class="search-results" id="searchResults"></div>
   </div>
   <div class="quick-tags">
@@ -649,7 +619,6 @@
         <div class="section-head">
           <h2>关注基金</h2>
           <div class="tools">
-            <label>声音提醒 <input id="soundInput" type="checkbox"></label>
             <button class="mini" id="removeBtn">删除选中</button>
             <button class="mini" id="clearFundsBtn">清空全部</button>
           </div>
@@ -1048,8 +1017,6 @@
     const STORAGE_KEY = "qdii-monitor-plus-v1";
     const DEFAULT_CONFIG = {
       refreshSeconds: 1,
-      alertPercent: 2,
-      soundAlert: true,
       thsEndpoint: "http://127.0.0.1:8787/ths?code={code}",
       selectedFund: "040046",
       stockWatch: ["AAPL", "MSFT", "NVDA", "TSLA"],
@@ -1126,22 +1093,17 @@
       lastDeepRefresh: 0,
       lastIntradayRefresh: 0,
       refreshStartedAt: 0,
-      alertShownAt: new Map(),
-      toastTimer: null,
       refreshing: false
     };
 
     const els = {
       status: document.querySelector("#status"),
-      toast: document.querySelector("#toast"),
       searchInput: document.querySelector("#searchInput"),
       searchBtn: document.querySelector("#searchBtn"),
       searchResults: document.querySelector("#searchResults"),
       themeBtns: document.querySelectorAll("[data-theme]"),
       refreshBtn: document.querySelector("#refreshBtn"),
       intervalInput: document.querySelector("#intervalInput"),
-      alertInput: document.querySelector("#alertInput"),
-      soundInput: document.querySelector("#soundInput"),
       removeBtn: document.querySelector("#removeBtn"),
       clearFundsBtn: document.querySelector("#clearFundsBtn"),
       ocrFile: document.querySelector("#ocrFile"),
@@ -3486,7 +3448,6 @@
       const deepRefreshDue = !state.lastDeepRefresh || Date.now() - state.lastDeepRefresh > 60000 || !fastMode;
       els.status.innerHTML = `<span class="refreshing-dot"></span>${deepRefreshDue ? "正在刷新完整行情..." : "正在秒级刷新涨跌数据..."}`;
 
-      const alerts = [];
       for (const fund of state.config.funds) {
         const quote = await fetchFundQuote(fund.code);
         state.quotes.set(fund.code, quote);
@@ -3497,7 +3458,6 @@
           const official = await fetchLatestOfficialNav(fund.code);
           state.latestOfficial.set(fund.code, official);
         }
-        if (!quote.error && Math.abs(quote.estimateChange) >= state.config.alertPercent) alerts.push(quote);
         renderFunds();
       }
 
@@ -3557,7 +3517,6 @@
       const elapsed = ((Date.now() - state.refreshStartedAt) / 1000).toFixed(1);
       if (deepRefreshDue) state.lastDeepRefresh = Date.now();
       els.status.textContent = `上次刷新: ${now}，耗时 ${elapsed}s，模式 ${deepRefreshDue ? "完整" : "秒级"}，基金 ${state.config.funds.length} 只，个股 ${stocks.length} 只`;
-      if (alerts.length) notifyAlerts(alerts);
       state.refreshing = false;
       els.refreshBtn.disabled = false;
       state.timer = setTimeout(refreshNow, Math.max(1, state.config.refreshSeconds) * 1000);
@@ -3592,42 +3551,6 @@
       state.history.set(key, data);
       renderHistory();
       renderSignals();
-    }
-
-    function notifyAlerts(quotes) {
-      const now = Date.now();
-      const fresh = quotes.filter(quote => {
-        const last = state.alertShownAt.get(quote.code) || 0;
-        if (now - last < 10 * 60 * 1000) return false;
-        state.alertShownAt.set(quote.code, now);
-        return true;
-      });
-      if (!fresh.length) return;
-
-      if (state.config.soundAlert) {
-        try {
-          const audio = new AudioContext();
-          const osc = audio.createOscillator();
-          const gain = audio.createGain();
-          osc.connect(gain);
-          gain.connect(audio.destination);
-          osc.frequency.value = 880;
-          gain.gain.value = .08;
-          osc.start();
-          osc.stop(audio.currentTime + .16);
-        } catch {}
-      }
-      showToast("涨跌提醒", fresh.slice(0, 5).map(q => `${q.code} ${q.name}: ${pct(q.estimateChange)}`));
-    }
-
-    function showToast(title, lines) {
-      clearTimeout(state.toastTimer);
-      const body = (Array.isArray(lines) ? lines : [lines]).map(escapeHtml).join("<br>");
-      els.toast.innerHTML = `<strong>${escapeHtml(title)}</strong>${body}`;
-      els.toast.classList.add("show");
-      state.toastTimer = setTimeout(() => {
-        els.toast.classList.remove("show");
-      }, 5200);
     }
 
     async function searchFunds() {
@@ -3729,8 +3652,6 @@
 
     function saveSettings() {
       state.config.refreshSeconds = Math.max(1, Number(els.intervalInput.value) || 1);
-      state.config.alertPercent = Math.max(0, Number(els.alertInput.value) || 0);
-      state.config.soundAlert = els.soundInput.checked;
       state.config.thsEndpoint = els.thsEndpointInput.value.trim();
       saveConfig();
     }
@@ -3764,8 +3685,6 @@
         renderSignals();
       });
       els.intervalInput.addEventListener("change", saveSettings);
-      els.alertInput.addEventListener("change", saveSettings);
-      els.soundInput.addEventListener("change", saveSettings);
       els.thsEndpointInput.addEventListener("change", () => {
         saveSettings();
         refreshThsSignal();
@@ -3873,8 +3792,6 @@
 
     function init() {
       els.intervalInput.value = state.config.refreshSeconds;
-      els.alertInput.value = state.config.alertPercent;
-      els.soundInput.checked = state.config.soundAlert;
       els.thsEndpointInput.value = state.config.thsEndpoint || "";
       els.tradeDate.value = todayInputValue();
       els.tradeTargetCode.disabled = els.tradeType.value !== "convert";
