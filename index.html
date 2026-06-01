@@ -2375,13 +2375,21 @@
       return Number.isFinite(future?.changePct) ? future.changePct : NaN;
     }
 
+    function calcFundRegularSignal(fund) {
+      const holdingSignal = calcHoldingSignals(state.holdings.get(fund.code));
+      return Number.isFinite(holdingSignal.regular) ? holdingSignal : null;
+    }
+
     function updateFundIntraday(fund, quote) {
       const market = inferFundMarket(fund, quote);
       const session = marketSession(market);
       const stage = classifyFundEstimateStage(fund, quote, session);
       const quoteChange = Number(quote?.estimateChange);
       const preSignal = calcFundPreSignal(fund, quote);
-      const change = stage === "pre" && Number.isFinite(preSignal) ? preSignal : quoteChange;
+      const regularSignal = calcFundRegularSignal(fund);
+      const change = stage === "pre" && Number.isFinite(preSignal)
+        ? preSignal
+        : (stage === "regular" && regularSignal ? regularSignal.regular : quoteChange);
       if (!Number.isFinite(change)) return;
       const existing = state.fundIntraday.get(fund.code) || { rows: [], market, session: session.stage, latest: {} };
       existing.market = market;
@@ -2464,7 +2472,11 @@
         const stage = classifyFundEstimateStage(fund, quote, session);
         const dataStage = estimateDataStage(fund, quote);
         const preChange = calcFundPreSignal(fund, quote);
-        const regularChange = stage === "regular" && dataStage !== "post" ? currentEstimateChange : NaN;
+        const holdingRegularSignal = calcFundRegularSignal(fund);
+        const regularChange = stage === "regular" && dataStage !== "post"
+          ? (holdingRegularSignal ? holdingRegularSignal.regular : currentEstimateChange)
+          : NaN;
+        const regularLabel = holdingRegularSignal ? `持仓${holdingRegularSignal.coverage.toFixed(1)}%` : "实时";
         const officialChange = officialPostChange(fund, quote, latestHistory);
         const postChange = Number.isFinite(officialChange)
           ? officialChange
@@ -2479,7 +2491,9 @@
           ? normalizeDateTimeText(latestOfficial?.date, "收盘后")
           : normalizeDateTimeText(quote.estimateTime || quote.navDate);
         const preTimeText = Number.isFinite(preChange) ? currentMinuteText() : "";
-        const regularTimeText = Number.isFinite(regularChange) ? normalizeDateTimeText(quote.estimateTime) : "";
+        const regularTimeText = Number.isFinite(regularChange)
+          ? (holdingRegularSignal?.regularTime || normalizeDateTimeText(quote.estimateTime))
+          : "";
         const postTimeText = Number.isFinite(officialChange)
           ? normalizeDateTimeText(latestOfficial?.date, "正式净值")
           : (Number.isFinite(postChange) ? normalizeDateTimeText(quote.estimateTime) : "");
@@ -2493,7 +2507,7 @@
           <td class="name" title="${escapeHtml(quote.name || fund.alias)}">${escapeHtml(quote.name || fund.alias || "")}</td>
           <td class="quote-cell">${displayNav ? withCellTime(`${money(displayNav)}${displayNavLabel ? ` <span class="muted">${displayNavLabel}</span>` : ""}`, estimateTimeText) : "--"}</td>
           <td class="${liveCls(preChange)} quote-cell">${liveText(Number.isFinite(preChange) ? withCellTime(pct(preChange), preTimeText, "预测") : "--")}</td>
-          <td class="${liveCls(regularChange)} quote-cell">${liveText(Number.isFinite(regularChange) ? withCellTime(pct(regularChange), regularTimeText, "实时") : "--")}</td>
+          <td class="${liveCls(regularChange)} quote-cell">${liveText(Number.isFinite(regularChange) ? withCellTime(pct(regularChange), regularTimeText, regularLabel) : "--")}</td>
           <td class="${liveCls(postChange)} quote-cell">${liveText(Number.isFinite(postChange) ? withCellTime(pct(postChange), postTimeText, postLabel || "估值") : "--")}</td>
           <td>${renderFundTrend(fund.code, currentEstimateChange)}</td>
           <td>${escapeHtml(quote.estimateTime || "")}</td>
