@@ -44,6 +44,34 @@
       text-align: right;
       line-height: 1.5;
     }
+    .toast {
+      position: fixed;
+      right: 18px;
+      top: 82px;
+      z-index: 20;
+      max-width: min(420px, calc(100vw - 36px));
+      padding: 11px 13px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .97);
+      box-shadow: 0 12px 30px rgba(17, 24, 39, .16);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.45;
+      opacity: 0;
+      transform: translateY(-8px);
+      pointer-events: none;
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .toast strong {
+      display: block;
+      margin-bottom: 3px;
+    }
     .toolbar {
       display: grid;
       grid-template-columns: minmax(280px, 1fr) auto auto auto auto;
@@ -533,6 +561,7 @@
     <h1>QDII 基金实时监测</h1>
     <div class="status" id="status">准备刷新</div>
   </header>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <div class="toolbar search-panel">
     <input id="searchInput" placeholder="输入基金名称或代码搜索，如 纳指、040046">
@@ -1097,11 +1126,14 @@
       lastDeepRefresh: 0,
       lastIntradayRefresh: 0,
       refreshStartedAt: 0,
+      alertShownAt: new Map(),
+      toastTimer: null,
       refreshing: false
     };
 
     const els = {
       status: document.querySelector("#status"),
+      toast: document.querySelector("#toast"),
       searchInput: document.querySelector("#searchInput"),
       searchBtn: document.querySelector("#searchBtn"),
       searchResults: document.querySelector("#searchResults"),
@@ -3563,6 +3595,15 @@
     }
 
     function notifyAlerts(quotes) {
+      const now = Date.now();
+      const fresh = quotes.filter(quote => {
+        const last = state.alertShownAt.get(quote.code) || 0;
+        if (now - last < 10 * 60 * 1000) return false;
+        state.alertShownAt.set(quote.code, now);
+        return true;
+      });
+      if (!fresh.length) return;
+
       if (state.config.soundAlert) {
         try {
           const audio = new AudioContext();
@@ -3576,7 +3617,17 @@
           osc.stop(audio.currentTime + .16);
         } catch {}
       }
-      alert(quotes.slice(0, 8).map(q => `${q.code} ${q.name}: ${pct(q.estimateChange)}`).join("\n"));
+      showToast("涨跌提醒", fresh.slice(0, 5).map(q => `${q.code} ${q.name}: ${pct(q.estimateChange)}`));
+    }
+
+    function showToast(title, lines) {
+      clearTimeout(state.toastTimer);
+      const body = (Array.isArray(lines) ? lines : [lines]).map(escapeHtml).join("<br>");
+      els.toast.innerHTML = `<strong>${escapeHtml(title)}</strong>${body}`;
+      els.toast.classList.add("show");
+      state.toastTimer = setTimeout(() => {
+        els.toast.classList.remove("show");
+      }, 5200);
     }
 
     async function searchFunds() {
